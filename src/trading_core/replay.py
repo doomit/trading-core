@@ -47,7 +47,11 @@ class ReplayConfig:
             raise ValueError("split must be DEV, VALID, or OOS")
         if self.fee_per_fill_usd < 0 or self.slippage_points < 0:
             raise ValueError("replay cost assumptions must be non-negative")
-        if self.exit_after_bars is not None and (not isinstance(self.exit_after_bars, int) or self.exit_after_bars < 1):
+        if self.exit_after_bars is not None and (
+            isinstance(self.exit_after_bars, bool)
+            or not isinstance(self.exit_after_bars, int)
+            or self.exit_after_bars < 1
+        ):
             raise ValueError("exit_after_bars must be a positive integer")
         if self.point_value_usd <= 0:
             raise ValueError("point_value_usd must be positive")
