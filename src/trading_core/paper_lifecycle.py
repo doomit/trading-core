@@ -74,20 +74,29 @@ def resolve_bracket_bar(position: PaperPosition, bar: Bar) -> BracketResolution:
 
     OHLC does not reveal intrabar ordering. If both protective stop and target
     are touched in the same bar, choose the stop deterministically so paper
-    results never benefit from unknowable look-ahead ordering.
+    results never benefit from unknowable look-ahead ordering. A stop-market
+    gap is filled at the worse bar open rather than at an unreachable stop.
     """
     if position.side == "LONG":
         stop_touched = bar.low <= position.stop_price
         target_touched = bar.high >= position.target_price
+        stop_gapped = bar.open < position.stop_price
     else:
         stop_touched = bar.high >= position.stop_price
         target_touched = bar.low <= position.target_price
+        stop_gapped = bar.open > position.stop_price
 
     if stop_touched:
+        if stop_gapped:
+            reason_code = "STOP_FILLED_GAP"
+            exit_price = bar.open
+        else:
+            reason_code = "STOP_FILLED_AMBIGUOUS_BAR" if target_touched else "STOP_FILLED"
+            exit_price = position.stop_price
         return BracketResolution(
             position_id=position.position_id,
-            reason_code="STOP_FILLED_AMBIGUOUS_BAR" if target_touched else "STOP_FILLED",
-            exit_price=position.stop_price,
+            reason_code=reason_code,
+            exit_price=exit_price,
             exit_quantity=position.quantity,
             remaining_quantity=0,
         )
