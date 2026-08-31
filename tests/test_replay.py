@@ -181,3 +181,17 @@ def test_replay_does_not_reenter_on_same_bar_as_prior_exit_but_allows_later_entr
     assert [(fill["signal_bar_index"], fill["role"]) for fill in result["fills"]] == [
         (0, "ENTRY"), (0, "EXIT"), (2, "ENTRY"), (2, "EXIT")
     ]
+
+
+def test_replay_config_rejects_bool_for_exit_after_bars():
+    _, ReplayConfig, _ = _replay_api()
+
+    with pytest.raises(ValueError, match="exit_after_bars must be a positive integer"):
+        ReplayConfig(
+            symbol="MES1!",
+            dataset_id="synthetic-mes-invalid-exit-bars-v1",
+            timeframe="5m",
+            split="DEV",
+            strategy_id="unit-test-invalid-exit-bars",
+            exit_after_bars=True,
+        )
