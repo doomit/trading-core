@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -68,6 +70,27 @@ def _in_split(config: ReplayConfig, bar: ReplayBar) -> bool:
 
 def _format_usd(value: Decimal) -> str:
     return format(value.quantize(_USD_QUANTUM), "f")
+
+
+def _canonical_config(config: ReplayConfig) -> dict[str, object]:
+    return {
+        "symbol": config.symbol,
+        "dataset_id": config.dataset_id,
+        "timeframe": config.timeframe,
+        "split": config.split,
+        "strategy_id": config.strategy_id,
+        "fee_per_fill_usd": str(config.fee_per_fill_usd),
+        "slippage_points": str(config.slippage_points),
+        "start": config.start.isoformat() if config.start is not None else None,
+        "end": config.end.isoformat() if config.end is not None else None,
+        "exit_after_bars": config.exit_after_bars,
+        "point_value_usd": str(config.point_value_usd),
+    }
+
+
+def _config_id(config_payload: Mapping[str, object]) -> str:
+    canonical_bytes = json.dumps(config_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(canonical_bytes).hexdigest()
 
 
 def run_replay(
@@ -155,8 +178,11 @@ def run_replay(
     net_total = sum((Decimal(trade["net_pnl_usd"]) for trade in trades), Decimal("0"))
     winner_count = sum(1 for trade in trades if Decimal(trade["net_pnl_usd"]) > 0)
     loser_count = sum(1 for trade in trades if Decimal(trade["net_pnl_usd"]) < 0)
+    config_payload = _canonical_config(config)
     return {
         "schema": "replay_result_v1",
+        "config": config_payload,
+        "config_id": _config_id(config_payload),
         "symbol": config.symbol,
         "dataset_id": config.dataset_id,
         "timeframe": config.timeframe,
