@@ -182,6 +182,10 @@ def _validate_current_schema(plan: dict[str, Any]) -> None:
     for field in ("plan_id", "trigger_event_id", "created_at", "valid_until", "symbol"):
         if not isinstance(plan.get(field), str) or not plan[field]:
             _schema_error(f"{field} must be a non-empty string")
+    if "based_on_state_version" in plan:
+        state_version = plan["based_on_state_version"]
+        if isinstance(state_version, bool) or not isinstance(state_version, (int, str, type(None))):
+            _schema_error("based_on_state_version must be an integer, string, or null")
     if plan.get("decision") not in _DECISIONS:
         _schema_error("decision is not supported")
     confidence = plan.get("confidence")
