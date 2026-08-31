@@ -195,3 +195,35 @@ def test_replay_config_rejects_bool_for_exit_after_bars():
             strategy_id="unit-test-invalid-exit-bars",
             exit_after_bars=True,
         )
+
+
+def test_replay_result_embeds_canonical_config_and_stable_config_identity():
+    ReplayBar, ReplayConfig, run_replay = _replay_api()
+    config = ReplayConfig(
+        symbol="MES1!",
+        dataset_id="synthetic-mes-roundtrip-v1",
+        timeframe="5m",
+        split="DEV",
+        strategy_id="unit-test-roundtrip",
+        fee_per_fill_usd=Decimal("1.30"),
+        slippage_points=Decimal("0.25"),
+        exit_after_bars=1,
+        point_value_usd=Decimal("5"),
+    )
+
+    result = run_replay(config, _bars(ReplayBar), {0: "LONG"})
+
+    assert result["config"] == {
+        "symbol": "MES1!",
+        "dataset_id": "synthetic-mes-roundtrip-v1",
+        "timeframe": "5m",
+        "split": "DEV",
+        "strategy_id": "unit-test-roundtrip",
+        "fee_per_fill_usd": "1.30",
+        "slippage_points": "0.25",
+        "start": None,
+        "end": None,
+        "exit_after_bars": 1,
+        "point_value_usd": "5",
+    }
+    assert result["config_id"] == "025bf2c3f35fb76361e3c168d9a26f8a941d83646fd13ea882a9a16fb8f2cc12"
