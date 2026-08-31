@@ -124,3 +124,31 @@ def test_trade_risk_and_quantity_limits_fail_closed():
 def test_market_provenance_and_three_closed_bar_start_gate_fail_closed():
     assert execute(plan(),risk_context=context(market_state=market(data_class="TEST"))).reason_code=="UNTRUSTED_FEED"
     assert execute(plan(),risk_context=context(market_state=market(consecutive_closed_bars=2))).reason_code=="INSUFFICIENT_FEED_HISTORY"
+
+
+def test_target_exit_closes_open_position_and_emits_true_terminal_completion():
+    from trading_core import paper_execution as paper_execution_module
+    from trading_core.paper_lifecycle import Bar
+
+    close_open_position = getattr(paper_execution_module, "close_open_position", None)
+    assert close_open_position is not None, "public core must expose deterministic OPEN->CLOSED paper lifecycle"
+
+    document = plan(position_action={
+        "quantity": 1,
+        "protective_stop": {"price": "5990.00"},
+        "take_profit": {"price": "6005.00"},
+    })
+    entry = execute(document)
+    bar = Bar(open=Decimal("6001.00"), high=Decimal("6006.00"), low=Decimal("6000.00"), close=Decimal("6004.00"))
+
+    result = close_open_position(document, entry, bar, occurred_at=NOW + timedelta(minutes=5))
+
+    assert result.terminal is True
+    assert result.status == "CLOSED"
+    assert result.reason_code == "TARGET_FILLED"
+    assert result.position is not None and result.position.status == "CLOSED"
+    assert result.trade is not None and result.trade.role == "EXIT"
+    assert result.trade.position_id == entry.position.position_id
+    assert result.trade.price == Decimal("6005.00")
+    assert [receipt["stage"] for receipt in result.receipts][-2:] == ["PAPER_EXIT_FILLED", "COMPLETED"]
+    assert all(receipt["event_id"] == EVENT_ID and receipt["plan_id"] == EVENT_ID for receipt in result.receipts)
