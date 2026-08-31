@@ -60,3 +60,42 @@ def test_replay_does_not_fill_a_signal_when_next_bar_is_outside_split_boundary()
     assert result["bar_count"] == 2
     assert result["start"] == split_start.isoformat()
     assert result["end"] == split_end.isoformat()
+
+
+def test_replay_emits_round_trip_trade_ledger_and_net_metrics_with_explicit_point_value():
+    ReplayBar, ReplayConfig, run_replay = _replay_api()
+    config = ReplayConfig(
+        symbol="MES1!",
+        dataset_id="synthetic-mes-roundtrip-v1",
+        timeframe="5m",
+        split="DEV",
+        strategy_id="unit-test-roundtrip",
+        fee_per_fill_usd=Decimal("1.30"),
+        slippage_points=Decimal("0.25"),
+        exit_after_bars=1,
+        point_value_usd=Decimal("5"),
+    )
+
+    result = run_replay(config, _bars(ReplayBar), {0: "LONG"})
+
+    assert result["trades"] == [
+        {
+            "signal_bar_index": 0,
+            "entry_bar_index": 1,
+            "exit_bar_index": 2,
+            "side": "LONG",
+            "entry_price": "6003.25",
+            "exit_price": "6006.75",
+            "gross_pnl_usd": "17.50",
+            "fees_usd": "2.60",
+            "net_pnl_usd": "14.90",
+        }
+    ]
+    assert result["metrics"] == {
+        "trade_count": 1,
+        "winner_count": 1,
+        "loser_count": 0,
+        "gross_pnl_usd": "17.50",
+        "net_pnl_usd": "14.90",
+    }
+    assert result["total_fees_usd"] == "2.60"
