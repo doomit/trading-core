@@ -150,6 +150,37 @@ class PaperFill:
 
 
 @dataclass(frozen=True)
+class PaperPositionRecord:
+    position_id: str
+    event_id: str
+    plan_id: str
+    order_id: str
+    entry_fill_id: str
+    symbol: str
+    side: str
+    quantity: int
+    entry_price: Decimal
+    opened_at: datetime
+    status: str = "OPEN"
+
+
+@dataclass(frozen=True)
+class PaperTrade:
+    trade_id: str
+    event_id: str
+    plan_id: str
+    order_id: str
+    fill_id: str
+    position_id: str
+    symbol: str
+    side: str
+    quantity: int
+    price: Decimal
+    occurred_at: datetime
+    role: str
+
+
+@dataclass(frozen=True)
 class RiskDecision:
     approved: bool
     reason_code: str
@@ -167,6 +198,8 @@ class ExecutionResult:
     receipts: tuple[dict[str, Any], ...]
     order: PaperOrder | None = None
     fill: PaperFill | None = None
+    position: PaperPositionRecord | None = None
+    trade: PaperTrade | None = None
 
 
 class PaperBroker(Protocol):
@@ -494,6 +527,35 @@ def execute_reserved_plan(
             )
 
         order, fill = broker.submit(risk.intent, context.market)
+        record_identity = hashlib.sha256(
+            f"{event_id}|{plan_id}|{plan_hash}|{order.order_id}|{fill.fill_id}".encode("utf-8")
+        ).hexdigest()
+        position = PaperPositionRecord(
+            position_id=f"paper-position:{record_identity[:32]}",
+            event_id=event_id,
+            plan_id=plan_id,
+            order_id=order.order_id,
+            entry_fill_id=fill.fill_id,
+            symbol=order.symbol,
+            side=order.side,
+            quantity=fill.quantity,
+            entry_price=fill.price,
+            opened_at=fill.occurred_at,
+        )
+        trade = PaperTrade(
+            trade_id=f"paper-trade:{record_identity[:32]}",
+            event_id=event_id,
+            plan_id=plan_id,
+            order_id=order.order_id,
+            fill_id=fill.fill_id,
+            position_id=position.position_id,
+            symbol=order.symbol,
+            side=order.side,
+            quantity=fill.quantity,
+            price=fill.price,
+            occurred_at=fill.occurred_at,
+            role="ENTRY",
+        )
         ordered = _receipt(
             event_id=event_id,
             plan_id=plan_id,
@@ -534,6 +596,8 @@ def execute_reserved_plan(
             receipts=(received, risk_receipt, ordered, filled, completed),
             order=order,
             fill=fill,
+            position=position,
+            trade=trade,
         )
 
     try:
@@ -563,6 +627,8 @@ __all__ = [
     "PaperBroker",
     "PaperFill",
     "PaperOrder",
+    "PaperPositionRecord",
+    "PaperTrade",
     "RiskContext",
     "RiskDecision",
     "RiskGateway",
