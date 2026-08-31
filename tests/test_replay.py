@@ -23,28 +23,11 @@ def _bars(ReplayBar):
 
 def test_replay_is_byte_stable_and_executes_closed_bar_signal_on_next_bar_open():
     ReplayBar, ReplayConfig, run_replay = _replay_api()
-    config = ReplayConfig(
-        symbol="MES1!",
-        dataset_id="synthetic-mes-3bars-v1",
-        timeframe="5m",
-        split="DEV",
-        strategy_id="unit-test-long-after-bar0",
-    )
-
+    config = ReplayConfig(symbol="MES1!", dataset_id="synthetic-mes-3bars-v1", timeframe="5m", split="DEV", strategy_id="unit-test-long-after-bar0")
     first = run_replay(config, _bars(ReplayBar), {0: "LONG"})
     second = run_replay(config, _bars(ReplayBar), {0: "LONG"})
-
-    first_bytes = json.dumps(first, sort_keys=True, separators=(",", ":")).encode()
-    second_bytes = json.dumps(second, sort_keys=True, separators=(",", ":")).encode()
-    assert first_bytes == second_bytes
-    assert first["fills"] == [
-        {
-            "signal_bar_index": 0,
-            "execution_bar_index": 1,
-            "side": "LONG",
-            "price": "6003",
-        }
-    ]
+    assert json.dumps(first, sort_keys=True, separators=(",", ":")).encode() == json.dumps(second, sort_keys=True, separators=(",", ":")).encode()
+    assert first["fills"] == [{"signal_bar_index": 0, "execution_bar_index": 1, "side": "LONG", "price": "6003"}]
     assert first["dataset_id"] == "synthetic-mes-3bars-v1"
     assert first["split"] == "DEV"
 
@@ -52,25 +35,28 @@ def test_replay_is_byte_stable_and_executes_closed_bar_signal_on_next_bar_open()
 def test_replay_applies_explicit_fee_and_adverse_slippage_assumptions():
     ReplayBar, ReplayConfig, run_replay = _replay_api()
     config = ReplayConfig(
-        symbol="MES1!",
-        dataset_id="synthetic-mes-costs-v1",
-        timeframe="5m",
-        split="DEV",
-        strategy_id="unit-test-costs",
-        fee_per_fill_usd=Decimal("1.30"),
-        slippage_points=Decimal("0.25"),
+        symbol="MES1!", dataset_id="synthetic-mes-costs-v1", timeframe="5m", split="DEV", strategy_id="unit-test-costs",
+        fee_per_fill_usd=Decimal("1.30"), slippage_points=Decimal("0.25"),
     )
-
     result = run_replay(config, _bars(ReplayBar), {0: "LONG"})
-
-    assert result["fills"] == [
-        {
-            "signal_bar_index": 0,
-            "execution_bar_index": 1,
-            "side": "LONG",
-            "price": "6003.25",
-        }
-    ]
+    assert result["fills"] == [{"signal_bar_index": 0, "execution_bar_index": 1, "side": "LONG", "price": "6003.25"}]
     assert result["fee_per_fill_usd"] == "1.30"
     assert result["slippage_points"] == "0.25"
     assert result["total_fees_usd"] == "1.30"
+
+
+def test_replay_does_not_fill_a_signal_when_next_bar_is_outside_split_boundary():
+    ReplayBar, ReplayConfig, run_replay = _replay_api()
+    split_start = datetime(2026, 8, 31, 14, 30, tzinfo=timezone.utc)
+    split_end = datetime(2026, 8, 31, 14, 35, tzinfo=timezone.utc)
+    config = ReplayConfig(
+        symbol="MES1!", dataset_id="synthetic-mes-split-v1", timeframe="5m", split="DEV", strategy_id="unit-test-split",
+        start=split_start, end=split_end,
+    )
+
+    result = run_replay(config, _bars(ReplayBar), {1: "LONG"})
+
+    assert result["fills"] == []
+    assert result["bar_count"] == 2
+    assert result["start"] == split_start.isoformat()
+    assert result["end"] == split_end.isoformat()
