@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trading_event_v1",
+  "title": "Trading Event v1",
+  "type": "object",
+  "required": ["schema", "event_id", "type", "timestamp"],
+  "properties": {
+    "schema": {"const": "trading_event_v1"},
+    "event_id": {"type": "string", "minLength": 1},
+    "type": {"type": "string", "minLength": 1},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "symbol": {"type": "string"},
+    "state_version": {"type": ["integer", "string"]},
+    "market": {"type": "object"},
+    "position": {},
+    "risk": {"type": "object"},
+    "active_plan_id": {"type": ["string", "null"]},
+    "payload": {"type": "object"}
+  },
+  "additionalProperties": true
+}
