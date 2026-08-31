@@ -31,6 +31,9 @@ STATUS_GLYPHS = {
     "INFO": "ℹ️",
     "REJECTED": "⛔",
     "FAIL": "🚨",
+    "FRESH": "✅",
+    "STALE": "⚠️",
+    "UNSEEN": "⏳",
 }
 
 
@@ -42,6 +45,10 @@ def _cell(value) -> str:
 
 def _money(value) -> str:
     return f"${float(value):,.2f}"
+
+
+def _age(value) -> str:
+    return "—" if value is None else f"{value}s"
 
 
 def _stage_line(current_stage: str, first_blocker_stage: str | None) -> str:
@@ -63,16 +70,58 @@ def _stage_line(current_stage: str, first_blocker_stage: str | None) -> str:
 
 def render_dashboard(state: dict) -> str:
     overall = state["overall_status"]
+    paper_ready = state.get("paper_ready")
+    blockers = state.get("readiness_blockers", [])
     lines = [
         "# Trading E2E Dashboard",
         "",
         f"**{STATUS_GLYPHS.get(overall, '•')} {overall}** · generated `{state['generated_at']}`",
         "",
-        "## System health",
+        "## Paper readiness",
         "",
-        "| Subsystem | Status | Updated | Summary |",
-        "| --- | --- | --- | --- |",
     ]
+
+    if paper_ready is None:
+        lines.append("Readiness projection unavailable in this dashboard state.")
+    else:
+        lines.append(f"**{'READY' if paper_ready else 'NOT READY'}**")
+        if blockers:
+            lines.append(f"**Blockers:** {', '.join(f'`{_cell(item)}`' for item in blockers)}")
+        else:
+            lines.append("**Blockers:** none")
+
+    lines.extend(
+        [
+            "",
+            "## Feed freshness",
+            "",
+            "| Symbol | Freshness | Age | Updated |",
+            "| --- | --- | ---: | --- |",
+        ]
+    )
+    feed_freshness = state.get("feed_freshness", {})
+    if not feed_freshness:
+        lines.append("| — | — | — | No symbol-level feed freshness available |")
+    else:
+        for symbol in ("MES", "MNQ"):
+            feed = feed_freshness.get(symbol)
+            if feed is None:
+                continue
+            freshness = feed.get("freshness", "UNSEEN")
+            lines.append(
+                f"| {symbol} | {STATUS_GLYPHS.get(freshness, '•')} {freshness} | "
+                f"{_age(feed.get('age_seconds'))} | {_cell(feed.get('updated_at'))} |"
+            )
+
+    lines.extend(
+        [
+            "",
+            "## System health",
+            "",
+            "| Subsystem | Status | Updated | Summary |",
+            "| --- | --- | --- | --- |",
+        ]
+    )
 
     for key, label in SUBSYSTEM_LABELS.items():
         subsystem = state["subsystems"][key]
@@ -100,6 +149,44 @@ def render_dashboard(state: dict) -> str:
                 f"**E2E latency:** {_cell(event.get('end_to_end_latency_ms'))} ms",
             ]
         )
+
+    lines.extend(
+        [
+            "",
+            "## Stuck work",
+            "",
+            "| Event | Age | First blocker |",
+            "| --- | ---: | --- |",
+        ]
+    )
+    stuck_work = state.get("stuck_work", [])
+    if not stuck_work:
+        lines.append("| — | — | No stuck work |")
+    else:
+        for item in stuck_work:
+            lines.append(
+                f"| `{_cell(item.get('event_id'))}` | {_age(item.get('age_seconds'))} | "
+                f"`{_cell(item.get('first_blocker_stage'))}` |"
+            )
+
+    lines.extend(
+        [
+            "",
+            "## Recent risk rejects",
+            "",
+            "| Time | Event | Reason |",
+            "| --- | --- | --- |",
+        ]
+    )
+    risk_rejects = state.get("risk_rejects", [])
+    if not risk_rejects:
+        lines.append("| — | — | No recent risk rejects |")
+    else:
+        for item in reversed(risk_rejects[-10:]):
+            lines.append(
+                f"| {_cell(item.get('occurred_at'))} | `{_cell(item.get('event_id'))}` | "
+                f"{_cell(item.get('reason_code'))} |"
+            )
 
     paper = state["paper"]
     lines.extend(
