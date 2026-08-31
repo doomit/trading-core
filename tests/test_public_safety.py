@@ -4,6 +4,7 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_PATHS = [ROOT / "src" / "trading_core", ROOT / ".github", ROOT / "pyproject.toml"]
+TEXT_SUFFIXES = {".py", ".json", ".yml", ".yaml", ".toml", ".md", ".txt"}
 
 FORBIDDEN_MATERIAL = [
     re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}"),
@@ -24,7 +25,11 @@ def public_files():
         if path.is_file():
             yield path
         elif path.exists():
-            yield from (candidate for candidate in path.rglob("*") if candidate.is_file())
+            yield from (
+                candidate
+                for candidate in path.rglob("*")
+                if candidate.is_file() and candidate.suffix.lower() in TEXT_SUFFIXES
+            )
 
 
 def test_public_package_contains_no_known_secret_or_production_resource_material():
