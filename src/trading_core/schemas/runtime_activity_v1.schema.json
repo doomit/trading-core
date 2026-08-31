@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "runtime_activity_v1.schema.json",
+  "title": "Trading runtime activity receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "receipt_id", "event_id", "stage", "status", "occurred_at", "source"],
+  "properties": {
+    "schema": {"const": "runtime_activity_v1"},
+    "receipt_id": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9._:-]+$"},
+    "event_id": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9._:-]+$"},
+    "stage": {"enum": ["EVENT_CREATED", "PR_COMMENT_CREATED", "BRAIN_TRIGGERED", "PLAN_WRITTEN", "PLAN_VALIDATED", "EXECUTOR_RECEIVED", "RISK_DECIDED", "PAPER_ORDERED", "PAPER_FILLED_OR_REJECTED", "COMPLETED"]},
+    "status": {"enum": ["PASS", "WAITING", "FAIL", "REJECTED", "INFO"]},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "source": {"enum": ["azure_event_producer", "github_feed", "chatgpt_event_task", "github_validation", "azure_executor", "risk_gateway", "paper_broker", "control_plane"]},
+    "plan_id": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9._:-]+$"},
+    "symbol": {"type": "string", "minLength": 1, "maxLength": 32},
+    "latency_ms": {"type": "integer", "minimum": 0},
+    "reason_code": {"type": "string", "minLength": 1, "maxLength": 96, "pattern": "^[A-Z0-9_:-]+$"},
+    "details": {
+      "type": "object",
+      "maxProperties": 20,
+      "propertyNames": {"not": {"pattern": "([sS][eE][cC][rR][eE][tT]|[pP][aA][sS][sS][wW][oO][rR][dD]|[tT][oO][kK][eE][nN]|[aA][uU][tT][hH][oO][rR][iI][zZ][aA][tT][iI][oO][nN]|[fF][uU][nN][cC][tT][iI][oO][nN][_-]?[kK][eE][yY]|[bB][rR][oO][kK][eE][rR][_-]?[kK][eE][yY])"}},
+      "additionalProperties": {"type": ["string", "number", "integer", "boolean", "null"]}
+    }
+  },
+  "allOf": [{
+    "if": {"properties": {"stage": {"enum": ["PLAN_WRITTEN", "PLAN_VALIDATED", "EXECUTOR_RECEIVED", "RISK_DECIDED", "PAPER_ORDERED", "PAPER_FILLED_OR_REJECTED", "COMPLETED"]}}},
+    "then": {"required": ["plan_id"]}
+  }]
+}
