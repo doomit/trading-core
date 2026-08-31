@@ -99,3 +99,26 @@ def test_replay_emits_round_trip_trade_ledger_and_net_metrics_with_explicit_poin
         "net_pnl_usd": "14.90",
     }
     assert result["total_fees_usd"] == "2.60"
+
+
+def test_replay_skips_entry_when_configured_round_trip_cannot_exit_inside_split():
+    ReplayBar, ReplayConfig, run_replay = _replay_api()
+    split_end = datetime(2026, 8, 31, 14, 35, tzinfo=timezone.utc)
+    config = ReplayConfig(
+        symbol="MES1!",
+        dataset_id="synthetic-mes-roundtrip-split-v1",
+        timeframe="5m",
+        split="DEV",
+        strategy_id="unit-test-roundtrip-split",
+        fee_per_fill_usd=Decimal("1.30"),
+        exit_after_bars=1,
+        point_value_usd=Decimal("5"),
+        end=split_end,
+    )
+
+    result = run_replay(config, _bars(ReplayBar), {0: "LONG"})
+
+    assert result["fills"] == []
+    assert result["trades"] == []
+    assert result["total_fees_usd"] == "0.00"
+    assert result["metrics"]["net_pnl_usd"] == "0.00"
