@@ -89,15 +89,19 @@ def run_replay(
             continue
         if not _in_split(config, bars[signal_bar_index]) or not _in_split(config, bars[execution_bar_index]):
             continue
+
+        exit_bar_index: int | None = None
+        if config.exit_after_bars is not None:
+            exit_bar_index = execution_bar_index + config.exit_after_bars
+            if exit_bar_index >= len(bars) or not _in_split(config, bars[exit_bar_index]):
+                continue
+
         raw_open = bars[execution_bar_index].open
         fill_price = raw_open + config.slippage_points if side == "LONG" else raw_open - config.slippage_points
         fills.append({"signal_bar_index": signal_bar_index, "execution_bar_index": execution_bar_index, "side": side, "price": str(fill_price)})
         fill_count += 1
 
-        if config.exit_after_bars is None:
-            continue
-        exit_bar_index = execution_bar_index + config.exit_after_bars
-        if exit_bar_index >= len(bars) or not _in_split(config, bars[exit_bar_index]):
+        if exit_bar_index is None:
             continue
         raw_exit = bars[exit_bar_index].open
         exit_price = raw_exit - config.slippage_points if side == "LONG" else raw_exit + config.slippage_points
