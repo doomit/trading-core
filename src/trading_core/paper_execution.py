@@ -1,0 +1,571 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import threading
+from dataclasses import dataclass
+from datetime import datetime
+from decimal import Decimal, InvalidOperation
+from typing import Any, Callable, Protocol
+
+
+AUTHORIZED_STARTING_EQUITY_USD = Decimal("50000.00")
+MAX_DAILY_LOSS_USD = Decimal("600.00")
+MAX_RISK_PER_TRADE_USD = Decimal("150.00")
+MAX_CONSECUTIVE_FAILURES = 3
+MAX_ENTRIES_PER_SESSION = 8
+MAX_OPEN_MICRO_CONTRACTS = 1
+MAX_FEED_AGE_SECONDS = Decimal("90")
+ROUND_TURN_COMMISSION_USD = Decimal("2.50")
+
+_INSTRUMENTS = {
+    "MES1!": {"tick_size": Decimal("0.25"), "point_value": Decimal("5.00")},
+    "MNQ1!": {"tick_size": Decimal("0.25"), "point_value": Decimal("2.00")},
+}
+
+
+def _decimal(value: Any, field: str) -> Decimal:
+    if isinstance(value, bool):
+        raise ValueError(f"{field} must be numeric")
+    try:
+        result = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise ValueError(f"{field} must be numeric") from exc
+    if not result.is_finite():
+        raise ValueError(f"{field} must be finite")
+    return result
+
+
+def _aware(value: datetime, field: str) -> None:
+    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{field} must be timezone-aware")
+
+
+def _parse_time(value: Any, field: str) -> datetime:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{field} must be a non-empty ISO timestamp")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{field} must be an ISO timestamp") from exc
+    _aware(parsed, field)
+    return parsed
+
+
+def canonical_plan_hash(plan: dict[str, Any]) -> str:
+    encoded = json.dumps(plan, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+@dataclass(frozen=True)
+class AccountState:
+    mode: str
+    starting_equity_usd: Decimal
+    equity_usd: Decimal
+    daily_realized_pnl_usd: Decimal
+    consecutive_failures: int
+    open_contracts_total: int
+    entries_this_session: int = 0
+
+    def __post_init__(self) -> None:
+        for field in ("starting_equity_usd", "equity_usd", "daily_realized_pnl_usd"):
+            object.__setattr__(self, field, _decimal(getattr(self, field), field))
+        for field in ("consecutive_failures", "open_contracts_total", "entries_this_session"):
+            value = getattr(self, field)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{field} must be a nonnegative integer")
+
+
+@dataclass(frozen=True)
+class MarketSnapshot:
+    symbol: str
+    feed_as_of: datetime
+    next_bar_start: datetime
+    next_bar_open: Decimal
+    environment: str
+    data_class: str
+    source: str
+    healthy: bool
+    consecutive_closed_bars: int
+
+    def __post_init__(self) -> None:
+        _aware(self.feed_as_of, "feed_as_of")
+        _aware(self.next_bar_start, "next_bar_start")
+        object.__setattr__(self, "next_bar_open", _decimal(self.next_bar_open, "next_bar_open"))
+        if self.next_bar_open <= 0:
+            raise ValueError("next_bar_open must be positive")
+        if isinstance(self.consecutive_closed_bars, bool) or not isinstance(self.consecutive_closed_bars, int):
+            raise ValueError("consecutive_closed_bars must be an integer")
+
+
+@dataclass(frozen=True)
+class RiskContext:
+    now: datetime
+    session_id: str
+    session_open: bool
+    kill_switch: bool
+    account: AccountState
+    market: MarketSnapshot
+
+    def __post_init__(self) -> None:
+        _aware(self.now, "now")
+        if not isinstance(self.session_id, str) or not self.session_id:
+            raise ValueError("session_id must be a non-empty string")
+        if not isinstance(self.session_open, bool) or not isinstance(self.kill_switch, bool):
+            raise ValueError("session flags must be booleans")
+
+
+@dataclass(frozen=True)
+class OrderIntent:
+    event_id: str
+    plan_id: str
+    plan_hash: str
+    symbol: str
+    side: str
+    quantity: int
+    expected_fill_price: Decimal
+    protective_stop_price: Decimal
+    risk_usd: Decimal
+    session_id: str
+    not_before: datetime
+
+
+@dataclass(frozen=True)
+class PaperOrder:
+    order_id: str
+    symbol: str
+    side: str
+    quantity: int
+    protective_stop_price: Decimal
+    submitted_at: datetime
+
+
+@dataclass(frozen=True)
+class PaperFill:
+    fill_id: str
+    order_id: str
+    price: Decimal
+    quantity: int
+    occurred_at: datetime
+
+
+@dataclass(frozen=True)
+class RiskDecision:
+    approved: bool
+    reason_code: str
+    intent: OrderIntent | None = None
+
+
+@dataclass(frozen=True)
+class ExecutionResult:
+    event_id: str
+    plan_id: str
+    plan_hash: str
+    status: str
+    reason_code: str
+    terminal: bool
+    receipts: tuple[dict[str, Any], ...]
+    order: PaperOrder | None = None
+    fill: PaperFill | None = None
+
+
+class PaperBroker(Protocol):
+    def submit(self, intent: OrderIntent, market_state: MarketSnapshot) -> tuple[PaperOrder, PaperFill]: ...
+
+
+class ExecutionConflict(RuntimeError):
+    pass
+
+
+class ExecutionLedger:
+    """Thread-safe exactly-once-in-effect ledger used behind the narrow executor seam."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._results: dict[str, tuple[str, str, ExecutionResult]] = {}
+
+    def execute_once(
+        self,
+        *,
+        plan_id: str,
+        event_id: str,
+        plan_hash: str,
+        operation: Callable[[], ExecutionResult],
+    ) -> ExecutionResult:
+        with self._lock:
+            existing = self._results.get(plan_id)
+            if existing is not None:
+                existing_event_id, existing_hash, existing_result = existing
+                if existing_event_id != event_id or existing_hash != plan_hash:
+                    raise ExecutionConflict("plan_id is already bound to another execution identity")
+                return existing_result
+            result = operation()
+            self._results[plan_id] = (event_id, plan_hash, result)
+            return result
+
+
+class RiskGateway:
+    def evaluate(
+        self,
+        plan: dict[str, Any],
+        *,
+        event_id: str,
+        plan_hash: str,
+        context: RiskContext,
+    ) -> RiskDecision:
+        account = context.account
+        market = context.market
+        symbol = plan.get("symbol")
+        decision = plan.get("decision")
+
+        if account.mode != "PAPER" or account.starting_equity_usd != AUTHORIZED_STARTING_EQUITY_USD:
+            return RiskDecision(False, "UNAUTHORIZED_ACCOUNT")
+        if not context.session_open:
+            return RiskDecision(False, "SESSION_CLOSED")
+        if context.kill_switch:
+            return RiskDecision(False, "KILL_SWITCH_ACTIVE")
+        if symbol not in _INSTRUMENTS or market.symbol != symbol:
+            return RiskDecision(False, "UNSUPPORTED_OR_MISMATCHED_SYMBOL")
+        if (
+            market.environment != "PROD"
+            or market.data_class != "REAL"
+            or market.source != "tradingview"
+            or not market.healthy
+        ):
+            return RiskDecision(False, "UNTRUSTED_FEED")
+        if market.consecutive_closed_bars < 3:
+            return RiskDecision(False, "INSUFFICIENT_FEED_HISTORY")
+        feed_age = Decimal(str((context.now - market.feed_as_of).total_seconds()))
+        if feed_age < 0:
+            return RiskDecision(False, "FEED_TIME_IN_FUTURE")
+        if feed_age > MAX_FEED_AGE_SECONDS:
+            return RiskDecision(False, "STALE_FEED")
+        if account.daily_realized_pnl_usd <= -MAX_DAILY_LOSS_USD:
+            return RiskDecision(False, "DAILY_LOSS_LIMIT_REACHED")
+        if account.consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+            return RiskDecision(False, "CONSECUTIVE_FAILURE_LIMIT_REACHED")
+        if account.open_contracts_total >= MAX_OPEN_MICRO_CONTRACTS:
+            return RiskDecision(False, "POSITION_LIMIT_REACHED")
+        if account.entries_this_session >= MAX_ENTRIES_PER_SESSION:
+            return RiskDecision(False, "SESSION_ENTRY_LIMIT_REACHED")
+        if decision not in {"LONG", "SHORT"}:
+            return RiskDecision(False, "UNSUPPORTED_DECISION")
+
+        action = plan.get("position_action")
+        if not isinstance(action, dict):
+            return RiskDecision(False, "MISSING_PROTECTIVE_STOP")
+        stop = action.get("protective_stop")
+        if not isinstance(stop, dict) or "price" not in stop:
+            return RiskDecision(False, "MISSING_PROTECTIVE_STOP")
+        try:
+            stop_price = _decimal(stop["price"], "protective_stop.price")
+        except ValueError:
+            return RiskDecision(False, "INVALID_PROTECTIVE_STOP")
+        quantity = action.get("quantity")
+        if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
+            return RiskDecision(False, "INVALID_ORDER_QUANTITY")
+        if quantity > MAX_OPEN_MICRO_CONTRACTS:
+            return RiskDecision(False, "POSITION_LIMIT_EXCEEDED")
+
+        created_at = _parse_time(plan.get("created_at"), "created_at")
+        valid_until = _parse_time(plan.get("valid_until"), "valid_until")
+        if context.now >= valid_until or market.next_bar_start >= valid_until:
+            return RiskDecision(False, "PLAN_EXPIRED")
+        if market.next_bar_start > context.now:
+            return RiskDecision(False, "NEXT_BAR_NOT_OBSERVED")
+        if market.next_bar_start <= created_at:
+            return RiskDecision(False, "NEXT_BAR_NOT_AFTER_PLAN")
+
+        instrument = _INSTRUMENTS[symbol]
+        adverse_tick = instrument["tick_size"] if decision == "LONG" else -instrument["tick_size"]
+        expected_fill = market.next_bar_open + adverse_tick
+        if decision == "LONG" and stop_price >= expected_fill:
+            return RiskDecision(False, "INVALID_PROTECTIVE_STOP_DIRECTION")
+        if decision == "SHORT" and stop_price <= expected_fill:
+            return RiskDecision(False, "INVALID_PROTECTIVE_STOP_DIRECTION")
+
+        risk_usd = (
+            abs(expected_fill - stop_price) * instrument["point_value"] * quantity
+            + ROUND_TURN_COMMISSION_USD * quantity
+        )
+        if risk_usd > MAX_RISK_PER_TRADE_USD:
+            return RiskDecision(False, "MAX_TRADE_RISK_EXCEEDED")
+
+        return RiskDecision(
+            True,
+            "RISK_APPROVED",
+            OrderIntent(
+                event_id=event_id,
+                plan_id=plan["plan_id"],
+                plan_hash=plan_hash,
+                symbol=symbol,
+                side=decision,
+                quantity=quantity,
+                expected_fill_price=expected_fill,
+                protective_stop_price=stop_price,
+                risk_usd=risk_usd,
+                session_id=context.session_id,
+                not_before=market.next_bar_start,
+            ),
+        )
+
+
+class DeterministicPaperBroker:
+    """Credential-free paper adapter with conservative, reproducible fills."""
+
+    def submit(self, intent: OrderIntent, market_state: MarketSnapshot) -> tuple[PaperOrder, PaperFill]:
+        if intent.symbol != market_state.symbol:
+            raise ValueError("order intent and market symbol do not match")
+        if market_state.next_bar_start < intent.not_before:
+            raise ValueError("paper fill precedes the allowed next bar")
+        identity = hashlib.sha256(f"{intent.event_id}|{intent.plan_id}|{intent.plan_hash}".encode("utf-8")).hexdigest()
+        order_id = f"paper-order:{identity[:32]}"
+        order = PaperOrder(
+            order_id=order_id,
+            symbol=intent.symbol,
+            side=intent.side,
+            quantity=intent.quantity,
+            protective_stop_price=intent.protective_stop_price,
+            submitted_at=market_state.next_bar_start,
+        )
+        fill = PaperFill(
+            fill_id=f"paper-fill:{identity[:32]}",
+            order_id=order_id,
+            price=intent.expected_fill_price,
+            quantity=intent.quantity,
+            occurred_at=market_state.next_bar_start,
+        )
+        return order, fill
+
+
+def _receipt(
+    *,
+    event_id: str,
+    plan_id: str,
+    stage: str,
+    status: str,
+    source: str,
+    occurred_at: datetime,
+    reason_code: str,
+    decision: str | None = None,
+) -> dict[str, Any]:
+    identity = hashlib.sha256(f"{event_id}|{plan_id}|{stage}|{source}".encode("utf-8")).hexdigest()
+    receipt: dict[str, Any] = {
+        "schema": "runtime_activity_v1",
+        "receipt_id": f"paper:{identity[:32]}",
+        "event_id": event_id,
+        "plan_id": plan_id,
+        "stage": stage,
+        "status": status,
+        "occurred_at": occurred_at.isoformat(),
+        "source": source,
+        "reason_code": reason_code,
+    }
+    if decision is not None:
+        receipt["details"] = {"decision": decision}
+    return receipt
+
+
+def _rejected_before_claim(
+    *,
+    event_id: str,
+    plan_id: str,
+    plan_hash: str,
+    context: RiskContext,
+    reason_code: str,
+) -> ExecutionResult:
+    return ExecutionResult(
+        event_id=event_id,
+        plan_id=plan_id,
+        plan_hash=plan_hash,
+        status="REJECTED",
+        reason_code=reason_code,
+        terminal=True,
+        receipts=(
+            _receipt(
+                event_id=event_id,
+                plan_id=plan_id,
+                stage="EXECUTOR_RECEIVED",
+                status="REJECTED",
+                source="azure_executor",
+                occurred_at=context.now,
+                reason_code=reason_code,
+            ),
+        ),
+    )
+
+
+def execute_reserved_plan(
+    plan: dict[str, Any],
+    *,
+    event_id: str,
+    reservation_plan_hash: str,
+    context: RiskContext,
+    risk_gateway: RiskGateway,
+    broker: PaperBroker,
+    ledger: ExecutionLedger,
+) -> ExecutionResult:
+    """Consume one validated/reserved trading_plan_v1 through paper execution."""
+    if not isinstance(plan, dict):
+        raise ValueError("plan must be an object")
+    plan_id = plan.get("plan_id")
+    plan_hash = canonical_plan_hash(plan)
+    if not isinstance(event_id, str) or not event_id or not isinstance(plan_id, str) or not plan_id:
+        raise ValueError("event_id and plan_id must be non-empty strings")
+    if plan.get("schema") != "trading_plan_v1" or plan.get("trigger_event_id") != event_id or plan_id != event_id:
+        return _rejected_before_claim(
+            event_id=event_id,
+            plan_id=plan_id,
+            plan_hash=plan_hash,
+            context=context,
+            reason_code="INVALID_EXECUTION_IDENTITY",
+        )
+    if reservation_plan_hash != plan_hash:
+        return _rejected_before_claim(
+            event_id=event_id,
+            plan_id=plan_id,
+            plan_hash=plan_hash,
+            context=context,
+            reason_code="RESERVATION_HASH_MISMATCH",
+        )
+
+    def operation() -> ExecutionResult:
+        decision = plan.get("decision")
+        received = _receipt(
+            event_id=event_id,
+            plan_id=plan_id,
+            stage="EXECUTOR_RECEIVED",
+            status="PASS",
+            source="azure_executor",
+            occurred_at=context.now,
+            reason_code="PLAN_RESERVED_FOR_EXECUTION",
+            decision=decision if isinstance(decision, str) else None,
+        )
+        if decision in {"NO_TRADE", "HOLD"}:
+            reason = f"PLAN_{decision}"
+            completed = _receipt(
+                event_id=event_id,
+                plan_id=plan_id,
+                stage="COMPLETED",
+                status="PASS",
+                source="azure_executor",
+                occurred_at=context.now,
+                reason_code=reason,
+                decision=decision,
+            )
+            return ExecutionResult(
+                event_id=event_id,
+                plan_id=plan_id,
+                plan_hash=plan_hash,
+                status="NO_EXECUTION",
+                reason_code=reason,
+                terminal=True,
+                receipts=(received, completed),
+            )
+
+        try:
+            risk = risk_gateway.evaluate(
+                plan,
+                event_id=event_id,
+                plan_hash=plan_hash,
+                context=context,
+            )
+        except ValueError:
+            risk = RiskDecision(False, "INVALID_EXECUTION_PLAN")
+        risk_receipt = _receipt(
+            event_id=event_id,
+            plan_id=plan_id,
+            stage="RISK_DECIDED",
+            status="PASS" if risk.approved else "REJECTED",
+            source="risk_gateway",
+            occurred_at=context.now,
+            reason_code=risk.reason_code,
+            decision=decision if isinstance(decision, str) else None,
+        )
+        if not risk.approved or risk.intent is None:
+            return ExecutionResult(
+                event_id=event_id,
+                plan_id=plan_id,
+                plan_hash=plan_hash,
+                status="REJECTED",
+                reason_code=risk.reason_code,
+                terminal=True,
+                receipts=(received, risk_receipt),
+            )
+
+        order, fill = broker.submit(risk.intent, context.market)
+        ordered = _receipt(
+            event_id=event_id,
+            plan_id=plan_id,
+            stage="PAPER_ORDERED",
+            status="PASS",
+            source="paper_broker",
+            occurred_at=order.submitted_at,
+            reason_code="PAPER_ORDER_CREATED",
+            decision=decision,
+        )
+        filled = _receipt(
+            event_id=event_id,
+            plan_id=plan_id,
+            stage="PAPER_FILLED_OR_REJECTED",
+            status="PASS",
+            source="paper_broker",
+            occurred_at=fill.occurred_at,
+            reason_code="PAPER_FILL_CREATED",
+            decision=decision,
+        )
+        completed = _receipt(
+            event_id=event_id,
+            plan_id=plan_id,
+            stage="COMPLETED",
+            status="PASS",
+            source="azure_executor",
+            occurred_at=fill.occurred_at,
+            reason_code="PAPER_ENTRY_FILLED",
+            decision=decision,
+        )
+        return ExecutionResult(
+            event_id=event_id,
+            plan_id=plan_id,
+            plan_hash=plan_hash,
+            status="FILLED",
+            reason_code="PAPER_ENTRY_FILLED",
+            terminal=True,
+            receipts=(received, risk_receipt, ordered, filled, completed),
+            order=order,
+            fill=fill,
+        )
+
+    try:
+        return ledger.execute_once(
+            plan_id=plan_id,
+            event_id=event_id,
+            plan_hash=plan_hash,
+            operation=operation,
+        )
+    except ExecutionConflict:
+        return _rejected_before_claim(
+            event_id=event_id,
+            plan_id=plan_id,
+            plan_hash=plan_hash,
+            context=context,
+            reason_code="PLAN_ID_EXECUTION_CONFLICT",
+        )
+
+
+__all__ = [
+    "AccountState",
+    "DeterministicPaperBroker",
+    "ExecutionLedger",
+    "ExecutionResult",
+    "MarketSnapshot",
+    "OrderIntent",
+    "PaperBroker",
+    "PaperFill",
+    "PaperOrder",
+    "RiskContext",
+    "RiskDecision",
+    "RiskGateway",
+    "canonical_plan_hash",
+    "execute_reserved_plan",
+]
