@@ -21,6 +21,19 @@ def _bars(ReplayBar):
     )
 
 
+def _six_bars(ReplayBar):
+    return tuple(
+        ReplayBar(
+            datetime(2026, 8, 31, 14, 30 + 5 * index, tzinfo=timezone.utc),
+            Decimal(6000 + index),
+            Decimal(6002 + index),
+            Decimal(5998 + index),
+            Decimal(6001 + index),
+        )
+        for index in range(6)
+    )
+
+
 def test_replay_is_byte_stable_and_executes_closed_bar_signal_on_next_bar_open():
     ReplayBar, ReplayConfig, run_replay = _replay_api()
     config = ReplayConfig(symbol="MES1!", dataset_id="synthetic-mes-3bars-v1", timeframe="5m", split="DEV", strategy_id="unit-test-long-after-bar0")
@@ -122,3 +135,43 @@ def test_replay_skips_entry_when_configured_round_trip_cannot_exit_inside_split(
     assert result["trades"] == []
     assert result["total_fees_usd"] == "0.00"
     assert result["metrics"]["net_pnl_usd"] == "0.00"
+
+
+def test_replay_skips_signal_whose_entry_would_overlap_an_active_round_trip():
+    ReplayBar, ReplayConfig, run_replay = _replay_api()
+    config = ReplayConfig(
+        symbol="MES1!",
+        dataset_id="synthetic-mes-one-position-v1",
+        timeframe="5m",
+        split="DEV",
+        strategy_id="unit-test-one-position",
+        exit_after_bars=2,
+        point_value_usd=Decimal("5"),
+    )
+
+    result = run_replay(config, _six_bars(ReplayBar), {0: "LONG", 1: "SHORT"})
+
+    assert [(trade["signal_bar_index"], trade["entry_bar_index"], trade["exit_bar_index"]) for trade in result["trades"]] == [(0, 1, 3)]
+    assert [fill["signal_bar_index"] for fill in result["fills"]] == [0]
+    assert result["metrics"]["trade_count"] == 1
+
+
+def test_replay_does_not_reenter_on_same_bar_as_prior_exit_but_allows_later_entry():
+    ReplayBar, ReplayConfig, run_replay = _replay_api()
+    config = ReplayConfig(
+        symbol="MNQ1!",
+        dataset_id="synthetic-mnq-reentry-v1",
+        timeframe="5m",
+        split="VALID",
+        strategy_id="unit-test-reentry-boundary",
+        exit_after_bars=1,
+        point_value_usd=Decimal("2"),
+    )
+
+    result = run_replay(config, _six_bars(ReplayBar), {0: "LONG", 1: "SHORT", 2: "SHORT"})
+
+    assert [(trade["signal_bar_index"], trade["entry_bar_index"], trade["exit_bar_index"]) for trade in result["trades"]] == [
+        (0, 1, 2),
+        (2, 3, 4),
+    ]
+    assert [fill["signal_bar_index"] for fill in result["fills"]] == [0, 2]
