@@ -32,12 +32,16 @@ class ReplayConfig:
     timeframe: str
     split: str
     strategy_id: str
+    fee_per_fill_usd: Decimal = Decimal("0")
+    slippage_points: Decimal = Decimal("0")
 
     def __post_init__(self) -> None:
         if not all(isinstance(value, str) and value for value in (self.symbol, self.dataset_id, self.timeframe, self.strategy_id)):
             raise ValueError("replay config identifiers must be non-empty strings")
         if self.split not in _ALLOWED_SPLITS:
             raise ValueError("split must be DEV, VALID, or OOS")
+        if self.fee_per_fill_usd < 0 or self.slippage_points < 0:
+            raise ValueError("replay cost assumptions must be non-negative")
 
 
 def run_replay(
@@ -59,15 +63,18 @@ def run_replay(
         execution_bar_index = signal_bar_index + 1
         if execution_bar_index >= len(bars):
             continue
+        raw_open = bars[execution_bar_index].open
+        fill_price = raw_open + config.slippage_points if side == "LONG" else raw_open - config.slippage_points
         fills.append(
             {
                 "signal_bar_index": signal_bar_index,
                 "execution_bar_index": execution_bar_index,
                 "side": side,
-                "price": str(bars[execution_bar_index].open),
+                "price": str(fill_price),
             }
         )
 
+    total_fees = config.fee_per_fill_usd * len(fills)
     return {
         "schema": "replay_result_v1",
         "symbol": config.symbol,
@@ -76,6 +83,9 @@ def run_replay(
         "split": config.split,
         "strategy_id": config.strategy_id,
         "bar_count": len(bars),
+        "fee_per_fill_usd": str(config.fee_per_fill_usd),
+        "slippage_points": str(config.slippage_points),
+        "total_fees_usd": str(total_fees),
         "fills": fills,
     }
 
