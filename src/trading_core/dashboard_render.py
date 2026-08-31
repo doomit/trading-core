@@ -100,18 +100,13 @@ def render_dashboard(state: dict) -> str:
         ]
     )
     feed_freshness = state.get("feed_freshness", {})
-    if not feed_freshness:
-        lines.append("| — | — | — | No symbol-level feed freshness available |")
-    else:
-        for symbol in ("MES", "MNQ"):
-            feed = feed_freshness.get(symbol)
-            if feed is None:
-                continue
-            freshness = feed.get("freshness", "UNSEEN")
-            lines.append(
-                f"| {symbol} | {STATUS_GLYPHS.get(freshness, '•')} {freshness} | "
-                f"{_age(feed.get('age_seconds'))} | {_cell(feed.get('updated_at'))} |"
-            )
+    for symbol in ("MES", "MNQ"):
+        feed = feed_freshness.get(symbol, {})
+        freshness = feed.get("freshness", "UNSEEN")
+        lines.append(
+            f"| {symbol} | {STATUS_GLYPHS.get(freshness, '•')} {freshness} | "
+            f"{_age(feed.get('age_seconds'))} | {_cell(feed.get('updated_at'))} |"
+        )
 
     lines.extend(
         [
