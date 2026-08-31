@@ -40,7 +40,7 @@ def test_replay_is_byte_stable_and_executes_closed_bar_signal_on_next_bar_open()
     first = run_replay(config, _bars(ReplayBar), {0: "LONG"})
     second = run_replay(config, _bars(ReplayBar), {0: "LONG"})
     assert json.dumps(first, sort_keys=True, separators=(",", ":")).encode() == json.dumps(second, sort_keys=True, separators=(",", ":")).encode()
-    assert first["fills"] == [{"signal_bar_index": 0, "execution_bar_index": 1, "side": "LONG", "price": "6003"}]
+    assert first["fills"] == [{"signal_bar_index": 0, "execution_bar_index": 1, "side": "LONG", "role": "ENTRY", "price": "6003"}]
     assert first["dataset_id"] == "synthetic-mes-3bars-v1"
     assert first["split"] == "DEV"
 
@@ -52,7 +52,7 @@ def test_replay_applies_explicit_fee_and_adverse_slippage_assumptions():
         fee_per_fill_usd=Decimal("1.30"), slippage_points=Decimal("0.25"),
     )
     result = run_replay(config, _bars(ReplayBar), {0: "LONG"})
-    assert result["fills"] == [{"signal_bar_index": 0, "execution_bar_index": 1, "side": "LONG", "price": "6003.25"}]
+    assert result["fills"] == [{"signal_bar_index": 0, "execution_bar_index": 1, "side": "LONG", "role": "ENTRY", "price": "6003.25"}]
     assert result["fee_per_fill_usd"] == "1.30"
     assert result["slippage_points"] == "0.25"
     assert result["total_fees_usd"] == "1.30"
@@ -91,6 +91,10 @@ def test_replay_emits_round_trip_trade_ledger_and_net_metrics_with_explicit_poin
 
     result = run_replay(config, _bars(ReplayBar), {0: "LONG"})
 
+    assert result["fills"] == [
+        {"signal_bar_index": 0, "execution_bar_index": 1, "side": "LONG", "role": "ENTRY", "price": "6003.25"},
+        {"signal_bar_index": 0, "execution_bar_index": 2, "side": "SHORT", "role": "EXIT", "price": "6006.75"},
+    ]
     assert result["trades"] == [
         {
             "signal_bar_index": 0,
@@ -152,7 +156,7 @@ def test_replay_skips_signal_whose_entry_would_overlap_an_active_round_trip():
     result = run_replay(config, _six_bars(ReplayBar), {0: "LONG", 1: "SHORT"})
 
     assert [(trade["signal_bar_index"], trade["entry_bar_index"], trade["exit_bar_index"]) for trade in result["trades"]] == [(0, 1, 3)]
-    assert [fill["signal_bar_index"] for fill in result["fills"]] == [0]
+    assert [(fill["signal_bar_index"], fill["role"]) for fill in result["fills"]] == [(0, "ENTRY"), (0, "EXIT")]
     assert result["metrics"]["trade_count"] == 1
 
 
@@ -174,4 +178,6 @@ def test_replay_does_not_reenter_on_same_bar_as_prior_exit_but_allows_later_entr
         (0, 1, 2),
         (2, 3, 4),
     ]
-    assert [fill["signal_bar_index"] for fill in result["fills"]] == [0, 2]
+    assert [(fill["signal_bar_index"], fill["role"]) for fill in result["fills"]] == [
+        (0, "ENTRY"), (0, "EXIT"), (2, "ENTRY"), (2, "EXIT")
+    ]
