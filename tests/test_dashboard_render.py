@@ -129,3 +129,19 @@ def test_render_dashboard_surfaces_operator_readiness_feed_stuck_and_risk_reject
     assert "evt-stuck" in markdown and "420s" in markdown
     assert "Recent risk rejects" in markdown
     assert "evt-reject" in markdown and "DAILY_LOSS_LIMIT" in markdown
+
+
+def test_render_dashboard_shows_unseen_canonical_symbol_when_feed_entry_missing():
+    state = base_state()
+    state["feed_freshness"] = {
+        "MES": {
+            "updated_at": "2026-08-30T15:45:50-07:00",
+            "age_seconds": 10,
+            "freshness": "FRESH",
+        }
+    }
+
+    markdown = render_dashboard(state)
+
+    assert "| MES | ✅ FRESH | 10s | 2026-08-30T15:45:50-07:00 |" in markdown
+    assert "| MNQ | ⏳ UNSEEN | — | — |" in markdown
