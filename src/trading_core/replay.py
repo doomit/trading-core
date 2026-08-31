@@ -101,13 +101,31 @@ def run_replay(
 
         raw_open = bars[execution_bar_index].open
         fill_price = raw_open + config.slippage_points if side == "LONG" else raw_open - config.slippage_points
-        fills.append({"signal_bar_index": signal_bar_index, "execution_bar_index": execution_bar_index, "side": side, "price": str(fill_price)})
+        fills.append(
+            {
+                "signal_bar_index": signal_bar_index,
+                "execution_bar_index": execution_bar_index,
+                "side": side,
+                "role": "ENTRY",
+                "price": str(fill_price),
+            }
+        )
         fill_count += 1
 
         if exit_bar_index is None:
             continue
         raw_exit = bars[exit_bar_index].open
         exit_price = raw_exit - config.slippage_points if side == "LONG" else raw_exit + config.slippage_points
+        exit_side = "SHORT" if side == "LONG" else "LONG"
+        fills.append(
+            {
+                "signal_bar_index": signal_bar_index,
+                "execution_bar_index": exit_bar_index,
+                "side": exit_side,
+                "role": "EXIT",
+                "price": str(exit_price),
+            }
+        )
         gross_points = exit_price - fill_price if side == "LONG" else fill_price - exit_price
         gross_pnl = gross_points * config.point_value_usd
         fees = config.fee_per_fill_usd * 2
