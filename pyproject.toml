@@ -7,13 +7,16 @@ name = "trading-core"
 version = "0.1.0"
 description = "Credential-free deterministic trading domain library"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["jsonschema>=4,<5"]
 
 [project.optional-dependencies]
 test = ["pytest>=8,<9"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"trading_core.schemas" = ["*.json"]
 
 [tool.pytest.ini_options]
 addopts = "-ra"
