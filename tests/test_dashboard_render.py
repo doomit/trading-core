@@ -82,3 +82,66 @@ def test_render_dashboard_handles_no_active_event():
     state["current_event"] = None
     markdown = render_dashboard(state)
     assert "No active correlated event" in markdown
+
+
+def test_render_dashboard_surfaces_operator_readiness_feed_stuck_and_risk_rejects():
+    state = base_state()
+    state.update(
+        paper_ready=False,
+        readiness_blockers=["market_feed:MNQ", "stuck_work"],
+        feed_freshness={
+            "MES": {
+                "updated_at": "2026-08-30T15:45:50-07:00",
+                "age_seconds": 10,
+                "freshness": "FRESH",
+            },
+            "MNQ": {
+                "updated_at": "2026-08-30T15:40:00-07:00",
+                "age_seconds": 360,
+                "freshness": "STALE",
+            },
+        },
+        stuck_work=[
+            {
+                "event_id": "evt-stuck",
+                "age_seconds": 420,
+                "first_blocker_stage": "EXECUTOR_RECEIVED",
+            }
+        ],
+        risk_rejects=[
+            {
+                "event_id": "evt-reject",
+                "occurred_at": "2026-08-30T15:44:00-07:00",
+                "reason_code": "DAILY_LOSS_LIMIT",
+            }
+        ],
+    )
+
+    markdown = render_dashboard(state)
+
+    assert "Paper readiness" in markdown
+    assert "NOT READY" in markdown
+    assert "market_feed:MNQ" in markdown
+    assert "Feed freshness" in markdown
+    assert "MES" in markdown and "FRESH" in markdown and "10s" in markdown
+    assert "MNQ" in markdown and "STALE" in markdown and "360s" in markdown
+    assert "Stuck work" in markdown
+    assert "evt-stuck" in markdown and "420s" in markdown
+    assert "Recent risk rejects" in markdown
+    assert "evt-reject" in markdown and "DAILY_LOSS_LIMIT" in markdown
+
+
+def test_render_dashboard_shows_unseen_canonical_symbol_when_feed_entry_missing():
+    state = base_state()
+    state["feed_freshness"] = {
+        "MES": {
+            "updated_at": "2026-08-30T15:45:50-07:00",
+            "age_seconds": 10,
+            "freshness": "FRESH",
+        }
+    }
+
+    markdown = render_dashboard(state)
+
+    assert "| MES | ✅ FRESH | 10s | 2026-08-30T15:45:50-07:00 |" in markdown
+    assert "| MNQ | ⏳ UNSEEN | — | — |" in markdown
