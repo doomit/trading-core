@@ -238,19 +238,11 @@ class ExecutionLedger:
 
 
 class RiskGateway:
-    def evaluate(
-        self,
-        plan: dict[str, Any],
-        *,
-        event_id: str,
-        plan_hash: str,
-        context: RiskContext,
-    ) -> RiskDecision:
+    def evaluate(self, plan: dict[str, Any], *, event_id: str, plan_hash: str, context: RiskContext) -> RiskDecision:
         account = context.account
         market = context.market
         symbol = plan.get("symbol")
         decision = plan.get("decision")
-
         if account.mode != "PAPER" or account.starting_equity_usd != AUTHORIZED_STARTING_EQUITY_USD:
             return RiskDecision(False, "UNAUTHORIZED_ACCOUNT")
         if not context.session_open:
@@ -259,12 +251,7 @@ class RiskGateway:
             return RiskDecision(False, "KILL_SWITCH_ACTIVE")
         if symbol not in _INSTRUMENTS or market.symbol != symbol:
             return RiskDecision(False, "UNSUPPORTED_OR_MISMATCHED_SYMBOL")
-        if (
-            market.environment != "PROD"
-            or market.data_class != "REAL"
-            or market.source != "tradingview"
-            or not market.healthy
-        ):
+        if market.environment != "PROD" or market.data_class != "REAL" or market.source != "tradingview" or not market.healthy:
             return RiskDecision(False, "UNTRUSTED_FEED")
         if market.consecutive_closed_bars < 3:
             return RiskDecision(False, "INSUFFICIENT_FEED_HISTORY")
@@ -283,7 +270,6 @@ class RiskGateway:
             return RiskDecision(False, "SESSION_ENTRY_LIMIT_REACHED")
         if decision not in {"LONG", "SHORT"}:
             return RiskDecision(False, "UNSUPPORTED_DECISION")
-
         action = plan.get("position_action")
         if not isinstance(action, dict):
             return RiskDecision(False, "MISSING_PROTECTIVE_STOP")
@@ -299,7 +285,6 @@ class RiskGateway:
             return RiskDecision(False, "INVALID_ORDER_QUANTITY")
         if quantity > MAX_OPEN_MICRO_CONTRACTS:
             return RiskDecision(False, "POSITION_LIMIT_EXCEEDED")
-
         created_at = _parse_time(plan.get("created_at"), "created_at")
         valid_until = _parse_time(plan.get("valid_until"), "valid_until")
         if context.now >= valid_until or market.next_bar_start >= valid_until:
@@ -308,7 +293,6 @@ class RiskGateway:
             return RiskDecision(False, "NEXT_BAR_NOT_OBSERVED")
         if market.next_bar_start <= created_at:
             return RiskDecision(False, "NEXT_BAR_NOT_AFTER_PLAN")
-
         instrument = _INSTRUMENTS[symbol]
         adverse_tick = instrument["tick_size"] if decision == "LONG" else -instrument["tick_size"]
         expected_fill = market.next_bar_open + adverse_tick
@@ -316,128 +300,39 @@ class RiskGateway:
             return RiskDecision(False, "INVALID_PROTECTIVE_STOP_DIRECTION")
         if decision == "SHORT" and stop_price <= expected_fill:
             return RiskDecision(False, "INVALID_PROTECTIVE_STOP_DIRECTION")
-
-        risk_usd = (
-            abs(expected_fill - stop_price) * instrument["point_value"] * quantity
-            + ROUND_TURN_COMMISSION_USD * quantity
-        )
+        risk_usd = abs(expected_fill - stop_price) * instrument["point_value"] * quantity + ROUND_TURN_COMMISSION_USD * quantity
         if risk_usd > MAX_RISK_PER_TRADE_USD:
             return RiskDecision(False, "MAX_TRADE_RISK_EXCEEDED")
-
-        return RiskDecision(
-            True,
-            "RISK_APPROVED",
-            OrderIntent(
-                event_id=event_id,
-                plan_id=plan["plan_id"],
-                plan_hash=plan_hash,
-                symbol=symbol,
-                side=decision,
-                quantity=quantity,
-                expected_fill_price=expected_fill,
-                protective_stop_price=stop_price,
-                risk_usd=risk_usd,
-                session_id=context.session_id,
-                not_before=market.next_bar_start,
-            ),
-        )
+        return RiskDecision(True, "RISK_APPROVED", OrderIntent(event_id, plan["plan_id"], plan_hash, symbol, decision, quantity, expected_fill, stop_price, risk_usd, context.session_id, market.next_bar_start))
 
 
 class DeterministicPaperBroker:
     """Credential-free paper adapter with conservative, reproducible fills."""
-
     def submit(self, intent: OrderIntent, market_state: MarketSnapshot) -> tuple[PaperOrder, PaperFill]:
         if intent.symbol != market_state.symbol:
             raise ValueError("order intent and market symbol do not match")
         if market_state.next_bar_start < intent.not_before:
             raise ValueError("paper fill precedes the allowed next bar")
-        identity = hashlib.sha256(f"{intent.event_id}|{intent.plan_id}|{intent.plan_hash}".encode("utf-8")).hexdigest()
+        identity = hashlib.sha256(f"{intent.event_id}|{intent.plan_id}|{intent.plan_hash}".encode()).hexdigest()
         order_id = f"paper-order:{identity[:32]}"
-        order = PaperOrder(
-            order_id=order_id,
-            symbol=intent.symbol,
-            side=intent.side,
-            quantity=intent.quantity,
-            protective_stop_price=intent.protective_stop_price,
-            submitted_at=market_state.next_bar_start,
-        )
-        fill = PaperFill(
-            fill_id=f"paper-fill:{identity[:32]}",
-            order_id=order_id,
-            price=intent.expected_fill_price,
-            quantity=intent.quantity,
-            occurred_at=market_state.next_bar_start,
-        )
+        order = PaperOrder(order_id, intent.symbol, intent.side, intent.quantity, intent.protective_stop_price, market_state.next_bar_start)
+        fill = PaperFill(f"paper-fill:{identity[:32]}", order_id, intent.expected_fill_price, intent.quantity, market_state.next_bar_start)
         return order, fill
 
 
-def _receipt(
-    *,
-    event_id: str,
-    plan_id: str,
-    stage: str,
-    status: str,
-    source: str,
-    occurred_at: datetime,
-    reason_code: str,
-    decision: str | None = None,
-) -> dict[str, Any]:
-    identity = hashlib.sha256(f"{event_id}|{plan_id}|{stage}|{source}".encode("utf-8")).hexdigest()
-    receipt: dict[str, Any] = {
-        "schema": "runtime_activity_v1",
-        "receipt_id": f"paper:{identity[:32]}",
-        "event_id": event_id,
-        "plan_id": plan_id,
-        "stage": stage,
-        "status": status,
-        "occurred_at": occurred_at.isoformat(),
-        "source": source,
-        "reason_code": reason_code,
-    }
+def _receipt(*, event_id: str, plan_id: str, stage: str, status: str, source: str, occurred_at: datetime, reason_code: str, decision: str | None = None) -> dict[str, Any]:
+    identity = hashlib.sha256(f"{event_id}|{plan_id}|{stage}|{source}".encode()).hexdigest()
+    receipt: dict[str, Any] = {"schema":"runtime_activity_v1","receipt_id":f"paper:{identity[:32]}","event_id":event_id,"plan_id":plan_id,"stage":stage,"status":status,"occurred_at":occurred_at.isoformat(),"source":source,"reason_code":reason_code}
     if decision is not None:
         receipt["details"] = {"decision": decision}
     return receipt
 
 
-def _rejected_before_claim(
-    *,
-    event_id: str,
-    plan_id: str,
-    plan_hash: str,
-    context: RiskContext,
-    reason_code: str,
-) -> ExecutionResult:
-    return ExecutionResult(
-        event_id=event_id,
-        plan_id=plan_id,
-        plan_hash=plan_hash,
-        status="REJECTED",
-        reason_code=reason_code,
-        terminal=True,
-        receipts=(
-            _receipt(
-                event_id=event_id,
-                plan_id=plan_id,
-                stage="EXECUTOR_RECEIVED",
-                status="REJECTED",
-                source="azure_executor",
-                occurred_at=context.now,
-                reason_code=reason_code,
-            ),
-        ),
-    )
+def _rejected_before_claim(*, event_id: str, plan_id: str, plan_hash: str, context: RiskContext, reason_code: str) -> ExecutionResult:
+    return ExecutionResult(event_id, plan_id, plan_hash, "REJECTED", reason_code, True, (_receipt(event_id=event_id, plan_id=plan_id, stage="EXECUTOR_RECEIVED", status="REJECTED", source="azure_executor", occurred_at=context.now, reason_code=reason_code),))
 
 
-def execute_reserved_plan(
-    plan: dict[str, Any],
-    *,
-    event_id: str,
-    reservation_plan_hash: str,
-    context: RiskContext,
-    risk_gateway: RiskGateway,
-    broker: PaperBroker,
-    ledger: ExecutionLedger,
-) -> ExecutionResult:
+def execute_reserved_plan(plan: dict[str, Any], *, event_id: str, reservation_plan_hash: str, context: RiskContext, risk_gateway: RiskGateway, broker: PaperBroker, ledger: ExecutionLedger) -> ExecutionResult:
     """Consume one validated/reserved trading_plan_v1 through paper execution."""
     if not isinstance(plan, dict):
         raise ValueError("plan must be an object")
@@ -446,192 +341,34 @@ def execute_reserved_plan(
     if not isinstance(event_id, str) or not event_id or not isinstance(plan_id, str) or not plan_id:
         raise ValueError("event_id and plan_id must be non-empty strings")
     if plan.get("schema") != "trading_plan_v1" or plan.get("trigger_event_id") != event_id or plan_id != event_id:
-        return _rejected_before_claim(
-            event_id=event_id,
-            plan_id=plan_id,
-            plan_hash=plan_hash,
-            context=context,
-            reason_code="INVALID_EXECUTION_IDENTITY",
-        )
+        return _rejected_before_claim(event_id=event_id, plan_id=plan_id, plan_hash=plan_hash, context=context, reason_code="INVALID_EXECUTION_IDENTITY")
     if reservation_plan_hash != plan_hash:
-        return _rejected_before_claim(
-            event_id=event_id,
-            plan_id=plan_id,
-            plan_hash=plan_hash,
-            context=context,
-            reason_code="RESERVATION_HASH_MISMATCH",
-        )
-
+        return _rejected_before_claim(event_id=event_id, plan_id=plan_id, plan_hash=plan_hash, context=context, reason_code="RESERVATION_HASH_MISMATCH")
     def operation() -> ExecutionResult:
         decision = plan.get("decision")
-        received = _receipt(
-            event_id=event_id,
-            plan_id=plan_id,
-            stage="EXECUTOR_RECEIVED",
-            status="PASS",
-            source="azure_executor",
-            occurred_at=context.now,
-            reason_code="PLAN_RESERVED_FOR_EXECUTION",
-            decision=decision if isinstance(decision, str) else None,
-        )
+        received = _receipt(event_id=event_id, plan_id=plan_id, stage="EXECUTOR_RECEIVED", status="PASS", source="azure_executor", occurred_at=context.now, reason_code="PLAN_RESERVED_FOR_EXECUTION", decision=decision if isinstance(decision, str) else None)
         if decision in {"NO_TRADE", "HOLD"}:
             reason = f"PLAN_{decision}"
-            completed = _receipt(
-                event_id=event_id,
-                plan_id=plan_id,
-                stage="COMPLETED",
-                status="PASS",
-                source="azure_executor",
-                occurred_at=context.now,
-                reason_code=reason,
-                decision=decision,
-            )
-            return ExecutionResult(
-                event_id=event_id,
-                plan_id=plan_id,
-                plan_hash=plan_hash,
-                status="NO_EXECUTION",
-                reason_code=reason,
-                terminal=True,
-                receipts=(received, completed),
-            )
-
+            completed = _receipt(event_id=event_id, plan_id=plan_id, stage="COMPLETED", status="PASS", source="azure_executor", occurred_at=context.now, reason_code=reason, decision=decision)
+            return ExecutionResult(event_id, plan_id, plan_hash, "NO_EXECUTION", reason, True, (received, completed))
         try:
-            risk = risk_gateway.evaluate(
-                plan,
-                event_id=event_id,
-                plan_hash=plan_hash,
-                context=context,
-            )
+            risk = risk_gateway.evaluate(plan, event_id=event_id, plan_hash=plan_hash, context=context)
         except ValueError:
             risk = RiskDecision(False, "INVALID_EXECUTION_PLAN")
-        risk_receipt = _receipt(
-            event_id=event_id,
-            plan_id=plan_id,
-            stage="RISK_DECIDED",
-            status="PASS" if risk.approved else "REJECTED",
-            source="risk_gateway",
-            occurred_at=context.now,
-            reason_code=risk.reason_code,
-            decision=decision if isinstance(decision, str) else None,
-        )
+        risk_receipt = _receipt(event_id=event_id, plan_id=plan_id, stage="RISK_DECIDED", status="PASS" if risk.approved else "REJECTED", source="risk_gateway", occurred_at=context.now, reason_code=risk.reason_code, decision=decision if isinstance(decision, str) else None)
         if not risk.approved or risk.intent is None:
-            return ExecutionResult(
-                event_id=event_id,
-                plan_id=plan_id,
-                plan_hash=plan_hash,
-                status="REJECTED",
-                reason_code=risk.reason_code,
-                terminal=True,
-                receipts=(received, risk_receipt),
-            )
-
+            return ExecutionResult(event_id, plan_id, plan_hash, "REJECTED", risk.reason_code, True, (received, risk_receipt))
         order, fill = broker.submit(risk.intent, context.market)
-        record_identity = hashlib.sha256(
-            f"{event_id}|{plan_id}|{plan_hash}|{order.order_id}|{fill.fill_id}".encode("utf-8")
-        ).hexdigest()
-        position = PaperPositionRecord(
-            position_id=f"paper-position:{record_identity[:32]}",
-            event_id=event_id,
-            plan_id=plan_id,
-            order_id=order.order_id,
-            entry_fill_id=fill.fill_id,
-            symbol=order.symbol,
-            side=order.side,
-            quantity=fill.quantity,
-            entry_price=fill.price,
-            opened_at=fill.occurred_at,
-        )
-        trade = PaperTrade(
-            trade_id=f"paper-trade:{record_identity[:32]}",
-            event_id=event_id,
-            plan_id=plan_id,
-            order_id=order.order_id,
-            fill_id=fill.fill_id,
-            position_id=position.position_id,
-            symbol=order.symbol,
-            side=order.side,
-            quantity=fill.quantity,
-            price=fill.price,
-            occurred_at=fill.occurred_at,
-            role="ENTRY",
-        )
-        ordered = _receipt(
-            event_id=event_id,
-            plan_id=plan_id,
-            stage="PAPER_ORDERED",
-            status="PASS",
-            source="paper_broker",
-            occurred_at=order.submitted_at,
-            reason_code="PAPER_ORDER_CREATED",
-            decision=decision,
-        )
-        filled = _receipt(
-            event_id=event_id,
-            plan_id=plan_id,
-            stage="PAPER_FILLED_OR_REJECTED",
-            status="PASS",
-            source="paper_broker",
-            occurred_at=fill.occurred_at,
-            reason_code="PAPER_FILL_CREATED",
-            decision=decision,
-        )
-        completed = _receipt(
-            event_id=event_id,
-            plan_id=plan_id,
-            stage="COMPLETED",
-            status="PASS",
-            source="azure_executor",
-            occurred_at=fill.occurred_at,
-            reason_code="PAPER_ENTRY_FILLED",
-            decision=decision,
-        )
-        return ExecutionResult(
-            event_id=event_id,
-            plan_id=plan_id,
-            plan_hash=plan_hash,
-            status="FILLED",
-            reason_code="PAPER_ENTRY_FILLED",
-            terminal=True,
-            receipts=(received, risk_receipt, ordered, filled, completed),
-            order=order,
-            fill=fill,
-            position=position,
-            trade=trade,
-        )
-
+        record_identity = hashlib.sha256(f"{event_id}|{plan_id}|{plan_hash}|{order.order_id}|{fill.fill_id}".encode()).hexdigest()
+        position = PaperPositionRecord(f"paper-position:{record_identity[:32]}", event_id, plan_id, order.order_id, fill.fill_id, order.symbol, order.side, fill.quantity, fill.price, fill.occurred_at)
+        trade = PaperTrade(f"paper-trade:{record_identity[:32]}", event_id, plan_id, order.order_id, fill.fill_id, position.position_id, order.symbol, order.side, fill.quantity, fill.price, fill.occurred_at, "ENTRY")
+        ordered = _receipt(event_id=event_id, plan_id=plan_id, stage="PAPER_ORDERED", status="PASS", source="paper_broker", occurred_at=order.submitted_at, reason_code="PAPER_ORDER_CREATED", decision=decision)
+        filled = _receipt(event_id=event_id, plan_id=plan_id, stage="PAPER_FILLED_OR_REJECTED", status="PASS", source="paper_broker", occurred_at=fill.occurred_at, reason_code="PAPER_FILL_CREATED", decision=decision)
+        return ExecutionResult(event_id, plan_id, plan_hash, "FILLED", "PAPER_ENTRY_FILLED_POSITION_OPEN", False, (received, risk_receipt, ordered, filled), order, fill, position, trade)
     try:
-        return ledger.execute_once(
-            plan_id=plan_id,
-            event_id=event_id,
-            plan_hash=plan_hash,
-            operation=operation,
-        )
+        return ledger.execute_once(plan_id=plan_id, event_id=event_id, plan_hash=plan_hash, operation=operation)
     except ExecutionConflict:
-        return _rejected_before_claim(
-            event_id=event_id,
-            plan_id=plan_id,
-            plan_hash=plan_hash,
-            context=context,
-            reason_code="PLAN_ID_EXECUTION_CONFLICT",
-        )
+        return _rejected_before_claim(event_id=event_id, plan_id=plan_id, plan_hash=plan_hash, context=context, reason_code="PLAN_ID_EXECUTION_CONFLICT")
 
 
-__all__ = [
-    "AccountState",
-    "DeterministicPaperBroker",
-    "ExecutionLedger",
-    "ExecutionResult",
-    "MarketSnapshot",
-    "OrderIntent",
-    "PaperBroker",
-    "PaperFill",
-    "PaperOrder",
-    "PaperPositionRecord",
-    "PaperTrade",
-    "RiskContext",
-    "RiskDecision",
-    "RiskGateway",
-    "canonical_plan_hash",
-    "execute_reserved_plan",
-]
+__all__ = ["AccountState","DeterministicPaperBroker","ExecutionLedger","ExecutionResult","MarketSnapshot","OrderIntent","PaperBroker","PaperFill","PaperOrder","PaperPositionRecord","PaperTrade","RiskContext","RiskDecision","RiskGateway","canonical_plan_hash","execute_reserved_plan"]
