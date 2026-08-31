@@ -202,6 +202,21 @@ def test_paper_fill_is_deterministic_conservative_and_uses_next_bar_only():
     assert first.fill.order_id == first.order.order_id
 
 
+def test_entry_fill_keeps_open_position_nonterminal_until_exit_lifecycle_completes():
+    result = execute(plan())
+
+    assert result.position is not None
+    assert result.position.status == "OPEN"
+    assert result.terminal is False
+    assert result.reason_code == "PAPER_ENTRY_FILLED_POSITION_OPEN"
+    assert [receipt["stage"] for receipt in result.receipts] == [
+        "EXECUTOR_RECEIVED",
+        "RISK_DECIDED",
+        "PAPER_ORDERED",
+        "PAPER_FILLED_OR_REJECTED",
+    ]
+
+
 def test_receipts_are_deterministic_and_correlated_by_event_and_plan():
     result = execute(plan())
 
