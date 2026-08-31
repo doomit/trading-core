@@ -143,7 +143,10 @@ def decide_brain_dispatch(
         return BrainDispatchDecision(
             DispatchAction.WAIT_FOR_DEEP, None, "PREFER_5M_CLOSE", False
         )
-    if eta <= 2.0 and scheduler_state != "LATE":
+    # Even when the previous scheduled slot was late, a healthy new quarter-hour
+    # opportunity is close enough to wait for. If that next slot also misses,
+    # its LATE state will be visible with a much larger ETA on the next check.
+    if eta <= 2.0:
         return BrainDispatchDecision(
             DispatchAction.WAIT_FOR_DEEP, None, "DEEP_BRAIN_IMMINENT", freeze
         )
