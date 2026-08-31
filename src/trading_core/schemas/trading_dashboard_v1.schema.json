@@ -1,96 +1,20 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "trading_dashboard_v1.schema.json",
-  "title": "Trading E2E dashboard state v1",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["schema", "generated_at", "overall_status", "subsystems", "paper", "recent_activity"],
-  "$defs": {
-    "subsystem": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["status", "updated_at", "summary"],
-      "properties": {
-        "status": {"enum": ["HEALTHY", "WAITING", "DEGRADED", "FAILING"]},
-        "updated_at": {"type": "string", "format": "date-time"},
-        "summary": {"type": "string", "minLength": 1, "maxLength": 240}
-      }
-    },
-    "activity": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["schema", "receipt_id", "event_id", "stage", "status", "occurred_at", "source"],
-      "properties": {
-        "schema": {"const": "runtime_activity_v1"},
-        "receipt_id": {"type": "string", "minLength": 1, "maxLength": 160},
-        "event_id": {"type": "string", "minLength": 1, "maxLength": 160},
-        "stage": {"enum": ["EVENT_CREATED", "PR_COMMENT_CREATED", "BRAIN_TRIGGERED", "PLAN_WRITTEN", "PLAN_VALIDATED", "EXECUTOR_RECEIVED", "RISK_DECIDED", "PAPER_ORDERED", "PAPER_FILLED_OR_REJECTED", "COMPLETED"]},
-        "status": {"enum": ["PASS", "WAITING", "FAIL", "REJECTED", "INFO"]},
-        "occurred_at": {"type": "string", "format": "date-time"},
-        "source": {"enum": ["azure_event_producer", "github_feed", "chatgpt_event_task", "github_validation", "azure_executor", "risk_gateway", "paper_broker", "control_plane"]},
-        "plan_id": {"type": "string", "minLength": 1, "maxLength": 160},
-        "symbol": {"type": "string", "minLength": 1, "maxLength": 32},
-        "latency_ms": {"type": "integer", "minimum": 0},
-        "reason_code": {"type": "string", "minLength": 1, "maxLength": 96},
-        "details": {
-          "type": "object",
-          "maxProperties": 20,
-          "propertyNames": {"not": {"pattern": "([sS][eE][cC][rR][eE][tT]|[pP][aA][sS][sS][wW][oO][rR][dD]|[tT][oO][kK][eE][nN]|[aA][uU][tT][hH][oO][rR][iI][zZ][aA][tT][iI][oO][nN]|[fF][uU][nN][cC][tT][iI][oO][nN][_-]?[kK][eE][yY]|[bB][rR][oO][kK][eE][rR][_-]?[kK][eE][yY])"}},
-          "additionalProperties": {"type": ["string", "number", "integer", "boolean", "null"]}
-        }
-      },
-      "allOf": [{
-        "if": {"properties": {"stage": {"enum": ["PLAN_WRITTEN", "PLAN_VALIDATED", "EXECUTOR_RECEIVED", "RISK_DECIDED", "PAPER_ORDERED", "PAPER_FILLED_OR_REJECTED", "COMPLETED"]}}},
-        "then": {"required": ["plan_id"]}
-      }]
-    }
+  "$schema":"https://json-schema.org/draft/2020-12/schema","$id":"trading_dashboard_v1.schema.json","title":"Trading E2E dashboard state v1","type":"object","additionalProperties":false,
+  "required":["schema","generated_at","overall_status","paper_ready","readiness_blockers","subsystems","feed_freshness","paper","stuck_work","risk_rejects","recent_activity"],
+  "$defs":{
+    "subsystem":{"type":"object","additionalProperties":false,"required":["status","updated_at","summary","age_seconds","freshness"],"properties":{"status":{"enum":["HEALTHY","WAITING","DEGRADED","FAILING"]},"updated_at":{"type":["string","null"],"format":"date-time"},"summary":{"type":"string","minLength":1,"maxLength":240},"age_seconds":{"type":["integer","null"],"minimum":0},"freshness":{"enum":["UNSEEN","FRESH","STALE"]}}},
+    "feed_symbol":{"type":"object","additionalProperties":false,"required":["updated_at","age_seconds","freshness"],"properties":{"updated_at":{"type":["string","null"],"format":"date-time"},"age_seconds":{"type":["integer","null"],"minimum":0},"freshness":{"enum":["UNSEEN","FRESH","STALE"]}}},
+    "activity":{"type":"object","additionalProperties":false,"required":["schema","receipt_id","event_id","stage","status","occurred_at","source"],"properties":{"schema":{"const":"runtime_activity_v1"},"receipt_id":{"type":"string","minLength":1,"maxLength":160},"event_id":{"type":"string","minLength":1,"maxLength":160},"stage":{"enum":["EVENT_CREATED","PR_COMMENT_CREATED","BRAIN_TRIGGERED","PLAN_WRITTEN","PLAN_VALIDATED","EXECUTOR_RECEIVED","RISK_DECIDED","PAPER_ORDERED","PAPER_FILLED_OR_REJECTED","COMPLETED"]},"status":{"enum":["PASS","WAITING","FAIL","REJECTED","INFO"]},"occurred_at":{"type":"string","format":"date-time"},"source":{"enum":["azure_event_producer","github_feed","chatgpt_event_task","github_validation","azure_executor","risk_gateway","paper_broker","control_plane"]},"plan_id":{"type":"string","minLength":1,"maxLength":160},"symbol":{"type":"string","minLength":1,"maxLength":32},"latency_ms":{"type":"integer","minimum":0},"reason_code":{"type":"string","minLength":1,"maxLength":96},"details":{"type":"object","maxProperties":20,"propertyNames":{"not":{"pattern":"([sS][eE][cC][rR][eE][tT]|[pP][aA][sS][sS][wW][oO][rR][dD]|[tT][oO][kK][eE][nN]|[aA][uU][tT][hH][oO][rR][iI][zZ][aA][tT][iI][oO][nN]|[fF][uU][nN][cC][tT][iI][oO][nN][_-]?[kK][eE][yY]|[bB][rR][oO][kK][eE][rR][_-]?[kK][eE][yY])"}},"additionalProperties":{"type":["string","number","integer","boolean","null"]}}},"allOf":[{"if":{"properties":{"stage":{"enum":["PLAN_WRITTEN","PLAN_VALIDATED","EXECUTOR_RECEIVED","RISK_DECIDED","PAPER_ORDERED","PAPER_FILLED_OR_REJECTED","COMPLETED"]}}},"then":{"required":["plan_id"]}}]},
+    "event_summary":{"type":["object","null"],"additionalProperties":false,"required":["event_id","current_stage"],"properties":{"event_id":{"type":"string","minLength":1,"maxLength":160},"plan_id":{"type":["string","null"],"maxLength":160},"symbol":{"type":["string","null"],"maxLength":32},"decision":{"type":["string","null"],"enum":["LONG","SHORT","NO_TRADE","HOLD","EXIT","UPDATE",null]},"current_stage":{"enum":["EVENT_CREATED","PR_COMMENT_CREATED","BRAIN_TRIGGERED","PLAN_WRITTEN","PLAN_VALIDATED","EXECUTOR_RECEIVED","RISK_DECIDED","PAPER_ORDERED","PAPER_FILLED_OR_REJECTED","COMPLETED"]},"first_blocker_stage":{"type":["string","null"]},"terminal_reason":{"type":["string","null"],"maxLength":240},"end_to_end_latency_ms":{"type":["integer","null"],"minimum":0}}}
   },
-  "properties": {
-    "schema": {"const": "trading_dashboard_v1"},
-    "generated_at": {"type": "string", "format": "date-time"},
-    "overall_status": {"enum": ["HEALTHY", "WAITING", "DEGRADED", "FAILING"]},
-    "subsystems": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["market_feed", "azure_event_producer", "chatgpt_brain", "azure_executor", "paper_account"],
-      "properties": {
-        "market_feed": {"$ref": "#/$defs/subsystem"},
-        "azure_event_producer": {"$ref": "#/$defs/subsystem"},
-        "chatgpt_brain": {"$ref": "#/$defs/subsystem"},
-        "azure_executor": {"$ref": "#/$defs/subsystem"},
-        "paper_account": {"$ref": "#/$defs/subsystem"}
-      }
-    },
-    "current_event": {
-      "type": ["object", "null"],
-      "additionalProperties": false,
-      "required": ["event_id", "current_stage"],
-      "properties": {
-        "event_id": {"type": "string", "minLength": 1, "maxLength": 160},
-        "plan_id": {"type": "string", "minLength": 1, "maxLength": 160},
-        "symbol": {"type": "string", "minLength": 1, "maxLength": 32},
-        "decision": {"enum": ["LONG", "SHORT", "NO_TRADE", "HOLD", "EXIT", "UPDATE"]},
-        "current_stage": {"enum": ["EVENT_CREATED", "PR_COMMENT_CREATED", "BRAIN_TRIGGERED", "PLAN_WRITTEN", "PLAN_VALIDATED", "EXECUTOR_RECEIVED", "RISK_DECIDED", "PAPER_ORDERED", "PAPER_FILLED_OR_REJECTED", "COMPLETED"]},
-        "first_blocker_stage": {"type": ["string", "null"], "enum": ["EVENT_CREATED", "PR_COMMENT_CREATED", "BRAIN_TRIGGERED", "PLAN_WRITTEN", "PLAN_VALIDATED", "EXECUTOR_RECEIVED", "RISK_DECIDED", "PAPER_ORDERED", "PAPER_FILLED_OR_REJECTED", "COMPLETED", null]},
-        "terminal_reason": {"type": ["string", "null"], "maxLength": 240},
-        "end_to_end_latency_ms": {"type": ["integer", "null"], "minimum": 0}
-      }
-    },
-    "paper": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["equity_usd", "realized_pnl_usd", "unrealized_pnl_usd", "position", "trade_count", "consecutive_losses", "paused", "kill_switch"],
-      "properties": {
-        "equity_usd": {"type": "number"},
-        "realized_pnl_usd": {"type": "number"},
-        "unrealized_pnl_usd": {"type": "number"},
-        "position": {"type": "string", "minLength": 1, "maxLength": 120},
-        "trade_count": {"type": "integer", "minimum": 0},
-        "consecutive_losses": {"type": "integer", "minimum": 0},
-        "paused": {"type": "boolean"},
-        "kill_switch": {"type": "boolean"}
-      }
-    },
-    "recent_activity": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/activity"}}
+  "properties":{
+    "schema":{"const":"trading_dashboard_v1"},"generated_at":{"type":"string","format":"date-time"},"overall_status":{"enum":["HEALTHY","WAITING","DEGRADED","FAILING"]},"paper_ready":{"type":"boolean"},"readiness_blockers":{"type":"array","maxItems":20,"items":{"type":"string","minLength":1,"maxLength":80}},
+    "subsystems":{"type":"object","additionalProperties":false,"required":["market_feed","azure_event_producer","chatgpt_brain","azure_executor","paper_account"],"properties":{"market_feed":{"$ref":"#/$defs/subsystem"},"azure_event_producer":{"$ref":"#/$defs/subsystem"},"chatgpt_brain":{"$ref":"#/$defs/subsystem"},"azure_executor":{"$ref":"#/$defs/subsystem"},"paper_account":{"$ref":"#/$defs/subsystem"}}},
+    "feed_freshness":{"type":"object","additionalProperties":false,"required":["MES","MNQ"],"properties":{"MES":{"$ref":"#/$defs/feed_symbol"},"MNQ":{"$ref":"#/$defs/feed_symbol"}}},
+    "current_event":{"$ref":"#/$defs/event_summary"},
+    "paper":{"type":"object","additionalProperties":false,"required":["equity_usd","realized_pnl_usd","unrealized_pnl_usd","position","trade_count","consecutive_losses","paused","kill_switch"],"properties":{"equity_usd":{"type":"number"},"realized_pnl_usd":{"type":"number"},"unrealized_pnl_usd":{"type":"number"},"position":{"type":"string","minLength":1,"maxLength":120},"trade_count":{"type":"integer","minimum":0},"consecutive_losses":{"type":"integer","minimum":0},"paused":{"type":"boolean"},"kill_switch":{"type":"boolean"}}},
+    "stuck_work":{"type":"array","maxItems":100,"items":{"type":"object","additionalProperties":false,"required":["event_id","age_seconds","first_blocker_stage"],"properties":{"event_id":{"type":"string","minLength":1,"maxLength":160},"age_seconds":{"type":"integer","minimum":0},"first_blocker_stage":{"type":"string","minLength":1,"maxLength":64}}}},
+    "risk_rejects":{"type":"array","maxItems":10,"items":{"type":"object","additionalProperties":false,"required":["event_id","occurred_at","reason_code"],"properties":{"event_id":{"type":"string","minLength":1,"maxLength":160},"occurred_at":{"type":"string","format":"date-time"},"reason_code":{"type":["string","null"],"maxLength":96}}}},
+    "recent_activity":{"type":"array","maxItems":100,"items":{"$ref":"#/$defs/activity"}}
   }
 }
