@@ -214,6 +214,7 @@ def test_replay_result_embeds_canonical_config_and_stable_config_identity():
     result = run_replay(config, _bars(ReplayBar), {0: "LONG"})
 
     assert result["config"] == {
+        "schema": "replay_config_v1",
         "symbol": "MES1!",
         "dataset_id": "synthetic-mes-roundtrip-v1",
         "timeframe": "5m",
@@ -226,4 +227,4 @@ def test_replay_result_embeds_canonical_config_and_stable_config_identity():
         "exit_after_bars": 1,
         "point_value_usd": "5",
     }
-    assert result["config_id"] == "025bf2c3f35fb76361e3c168d9a26f8a941d83646fd13ea882a9a16fb8f2cc12"
+    assert result["config_id"] == "282587f6124d14ffa5285e2569a0c2b0b2615851b3ca690c8383e6a490259d63"
