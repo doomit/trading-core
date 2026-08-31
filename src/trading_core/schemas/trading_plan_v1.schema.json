@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trading_plan_v1",
+  "title": "Trading Plan v1",
+  "type": "object",
+  "required": ["schema", "plan_id", "trigger_event_id", "created_at", "valid_until", "symbol", "decision", "confidence", "analysis_summary"],
+  "properties": {
+    "schema": {"const": "trading_plan_v1"},
+    "plan_id": {"type": "string", "minLength": 1},
+    "trigger_event_id": {"type": "string", "minLength": 1},
+    "based_on_state_version": {"type": ["integer", "string", "null"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "valid_until": {"type": "string", "format": "date-time"},
+    "symbol": {"type": "string", "minLength": 1},
+    "decision": {"enum": ["LONG", "SHORT", "NO_TRADE", "HOLD", "EXIT", "UPDATE"]},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "analysis_summary": {"type": "array", "items": {"type": "string"}},
+    "regime": {"type": "object"},
+    "scenarios": {"type": "array"},
+    "cancel_if": {"type": "array", "items": {"type": "string"}},
+    "position_action": {"type": ["object", "null"]}
+  },
+  "additionalProperties": true
+}
