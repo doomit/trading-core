@@ -6,7 +6,10 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from importlib.resources import files
 from typing import Any, Protocol
+
+from jsonschema import Draft202012Validator
 
 
 _EVENT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$")
@@ -22,6 +25,8 @@ _REQUIRED_FIELDS = {
     "confidence",
     "analysis_summary",
 }
+_PLAN_SCHEMA = json.loads(files("trading_core.schemas").joinpath("trading_plan_v1.schema.json").read_text(encoding="utf-8"))
+_PLAN_VALIDATOR = Draft202012Validator(_PLAN_SCHEMA)
 
 
 class PickupStatus(str, Enum):
@@ -174,6 +179,14 @@ def _parse_aware_timestamp(value: Any, field: str) -> datetime:
 def _validate_current_schema(plan: dict[str, Any]) -> None:
     if not isinstance(plan, dict):
         _schema_error("plan must be an object")
+
+    schema_errors = sorted(_PLAN_VALIDATOR.iter_errors(plan), key=lambda error: list(error.absolute_path))
+    if schema_errors:
+        error = schema_errors[0]
+        location = ".".join(str(part) for part in error.absolute_path)
+        prefix = f"{location}: " if location else ""
+        _schema_error(f"{prefix}{error.message}")
+
     missing = sorted(_REQUIRED_FIELDS - set(plan))
     if missing:
         _schema_error(f"missing required fields: {', '.join(missing)}")
