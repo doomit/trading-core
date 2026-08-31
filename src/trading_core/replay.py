@@ -78,6 +78,7 @@ def run_replay(
     fills: list[dict[str, object]] = []
     trades: list[dict[str, object]] = []
     fill_count = 0
+    active_exit_bar_index: int | None = None
     for signal_bar_index in sorted(signals_by_bar_index):
         if not isinstance(signal_bar_index, int) or signal_bar_index < 0 or signal_bar_index >= len(bars):
             raise ValueError("signal bar index is outside the replay dataset")
@@ -92,6 +93,8 @@ def run_replay(
 
         exit_bar_index: int | None = None
         if config.exit_after_bars is not None:
+            if active_exit_bar_index is not None and execution_bar_index <= active_exit_bar_index:
+                continue
             exit_bar_index = execution_bar_index + config.exit_after_bars
             if exit_bar_index >= len(bars) or not _in_split(config, bars[exit_bar_index]):
                 continue
@@ -123,6 +126,7 @@ def run_replay(
                 "net_pnl_usd": _format_usd(net_pnl),
             }
         )
+        active_exit_bar_index = exit_bar_index
 
     total_fees = config.fee_per_fill_usd * fill_count
     gross_total = sum((Decimal(trade["gross_pnl_usd"]) for trade in trades), Decimal("0"))
