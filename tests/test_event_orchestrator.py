@@ -184,3 +184,16 @@ def test_event_record_requires_aware_ordered_times():
 def test_validate_trading_plan_accepts_canonical_plan():
     event_id = "evt_mes_20260830T230500Z_0005"
     validate_trading_plan(valid_plan(event_id), expected_event_id=event_id, now=NOW, expected_symbol="MES1!")
+
+
+def test_validate_trading_plan_rejects_schema_invalid_optional_state_version():
+    event_id = "evt_mes_20260830T230500Z_0006"
+    result = classify_plan_pickup(
+        valid_plan(event_id, based_on_state_version=True),
+        expected_event_id=event_id,
+        now=NOW,
+        expected_symbol="MES1!",
+    )
+    assert result.status is PickupStatus.REJECTED
+    assert result.reason_code == "INVALID_PLAN_SCHEMA"
+    assert result.plan is None
