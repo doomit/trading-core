@@ -11,6 +11,7 @@ from typing import Mapping, Sequence
 _ALLOWED_SPLITS = {"DEV", "VALID", "OOS"}
 _ALLOWED_SIDES = {"LONG", "SHORT"}
 _USD_QUANTUM = Decimal("0.01")
+_REPLAY_CONFIG_SCHEMA = "replay_config_v1"
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,7 @@ def _format_usd(value: Decimal) -> str:
 
 def _canonical_config(config: ReplayConfig) -> dict[str, object]:
     return {
+        "schema": _REPLAY_CONFIG_SCHEMA,
         "symbol": config.symbol,
         "dataset_id": config.dataset_id,
         "timeframe": config.timeframe,
