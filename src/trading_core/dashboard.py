@@ -12,6 +12,7 @@ CANONICAL_STAGES = ["EVENT_CREATED", "PR_COMMENT_CREATED", "BRAIN_TRIGGERED", "P
 SOURCE_TO_SUBSYSTEM = {"github_feed": "market_feed", "azure_event_producer": "azure_event_producer", "chatgpt_event_task": "chatgpt_brain", "azure_executor": "azure_executor", "risk_gateway": "paper_account", "paper_broker": "paper_account"}
 DEFAULT_SUMMARIES = {"market_feed": "No correlated market-feed health receipt yet", "azure_event_producer": "No Azure event-producer receipt yet", "chatgpt_brain": "No ChatGPT event-task receipt yet", "azure_executor": "No Azure executor receipt yet", "paper_account": "No paper execution receipt yet"}
 FRESH_SECONDS = {"market_feed": 90, "azure_event_producer": 300, "chatgpt_brain": 300, "azure_executor": 300, "paper_account": 300}
+EXPECTED_FEED_SYMBOLS = ("MES", "MNQ")
 STUCK_SECONDS = 300
 
 
@@ -89,6 +90,25 @@ def _subsystem_state(activities: list[dict], paper: dict, generated_at: str) -> 
     return subsystems
 
 
+def _feed_freshness(activities: list[dict], generated_at: str) -> dict[str, dict]:
+    now = _parse_time(generated_at)
+    latest_by_symbol: dict[str, dict] = {}
+    for activity in sorted(activities, key=lambda x: _parse_time(x["occurred_at"])):
+        symbol = activity.get("symbol")
+        if activity.get("source") == "github_feed" and symbol in EXPECTED_FEED_SYMBOLS:
+            latest_by_symbol[symbol] = activity
+
+    result = {}
+    for symbol in EXPECTED_FEED_SYMBOLS:
+        activity = latest_by_symbol.get(symbol)
+        if activity is None:
+            result[symbol] = {"updated_at": None, "age_seconds": None, "freshness": "UNSEEN"}
+            continue
+        age = max(0, int((now - _parse_time(activity["occurred_at"])).total_seconds()))
+        result[symbol] = {"updated_at": activity["occurred_at"], "age_seconds": age, "freshness": "STALE" if age > FRESH_SECONDS["market_feed"] else "FRESH"}
+    return result
+
+
 def _overall_status(subsystems: dict) -> str:
     statuses = {x["status"] for x in subsystems.values()}
     for value in ("FAILING", "DEGRADED", "WAITING"):
@@ -104,6 +124,7 @@ def build_dashboard_state(activities: list[dict], paper: dict, generated_at: str
     if by_event:
         newest = max(by_event, key=lambda eid: max(_parse_time(x["occurred_at"]) for x in by_event[eid])); current_event = summaries[newest]
     subsystems = _subsystem_state(ordered, paper, generated_at)
+    feed_freshness = _feed_freshness(ordered, generated_at)
     stuck = []
     for eid, receipts in by_event.items():
         summary = summaries[eid]
@@ -112,11 +133,12 @@ def build_dashboard_state(activities: list[dict], paper: dict, generated_at: str
             if age > STUCK_SECONDS: stuck.append({"event_id": eid, "age_seconds": age, "first_blocker_stage": summary["first_blocker_stage"]})
     risk_rejects = [{"event_id": x["event_id"], "occurred_at": x["occurred_at"], "reason_code": x.get("reason_code")} for x in ordered if x["stage"] == "RISK_DECIDED" and x["status"] == "REJECTED"][-10:]
     blockers = [name for name, state in subsystems.items() if state["status"] != "HEALTHY"]
+    blockers.extend(f"market_feed:{symbol}" for symbol, state in feed_freshness.items() if state["freshness"] != "FRESH")
     if paper.get("paused"): blockers.append("paper_paused")
     if paper.get("kill_switch"): blockers.append("kill_switch")
     if stuck: blockers.append("stuck_work")
     blockers = list(dict.fromkeys(blockers))
-    return {"schema": "trading_dashboard_v1", "generated_at": generated_at, "overall_status": _overall_status(subsystems), "paper_ready": not blockers, "readiness_blockers": blockers, "subsystems": subsystems, "current_event": current_event, "paper": dict(paper), "stuck_work": stuck, "risk_rejects": risk_rejects, "recent_activity": ordered[-20:]}
+    return {"schema": "trading_dashboard_v1", "generated_at": generated_at, "overall_status": _overall_status(subsystems), "paper_ready": not blockers, "readiness_blockers": blockers, "subsystems": subsystems, "feed_freshness": feed_freshness, "current_event": current_event, "paper": dict(paper), "stuck_work": stuck, "risk_rejects": risk_rejects, "recent_activity": ordered[-20:]}
 
 
 __all__ = ["CANONICAL_STAGES", "build_dashboard_state", "dashboard_validator", "load_dashboard_schema", "validate_dashboard"]
