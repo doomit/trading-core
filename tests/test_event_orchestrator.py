@@ -87,6 +87,7 @@ def test_missing_plan_waits_and_valid_plan_is_ready():
         ({"plan_id": "evt_other"}, "PLAN_ID_MISMATCH"),
         ({"decision": "BUY"}, "INVALID_PLAN_SCHEMA"),
         ({"confidence": True}, "INVALID_PLAN_SCHEMA"),
+        ({"based_on_state_version": True}, "INVALID_PLAN_SCHEMA"),
         ({"created_at": "2026-08-30T23:04:55"}, "INVALID_PLAN_TIME"),
         ({"valid_until": "2026-08-30T23:05:55"}, "INVALID_PLAN_TIME"),
         (
@@ -105,6 +106,17 @@ def test_invalid_or_stale_plan_fails_closed(changes, reason):
     assert result.status is PickupStatus.REJECTED
     assert result.reason_code == reason
     assert result.plan is None
+
+
+@pytest.mark.parametrize("state_version", [7, "snapshot-7", None])
+def test_based_on_state_version_accepts_only_canonical_schema_types(state_version):
+    event_id = "evt_mes_20260830T230500Z_0001"
+    result = classify_plan_pickup(
+        valid_plan(event_id, based_on_state_version=state_version),
+        expected_event_id=event_id,
+        now=NOW,
+    )
+    assert result.status is PickupStatus.READY
 
 
 def test_symbol_binding_fails_closed():
