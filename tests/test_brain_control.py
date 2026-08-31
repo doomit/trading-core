@@ -31,6 +31,20 @@ def test_medium_deviation_waits_when_deep_brain_is_close():
     assert decision.action is DispatchAction.WAIT_FOR_DEEP
 
 
+def test_even_late_previous_slot_waits_when_next_deep_is_imminent():
+    decision = decide_brain_dispatch(
+        severity="HIGH",
+        requested_tier="L2",
+        minutes_to_next_deep=1.0,
+        scheduler_state="LATE",
+        event_inflight=False,
+        events_this_hour=2,
+        is_5m_close=True,
+        emergency=False,
+    )
+    assert decision.action is DispatchAction.WAIT_FOR_DEEP
+
+
 def test_material_invalidation_dispatches_when_next_deep_is_far():
     decision = decide_brain_dispatch(
         severity="HIGH",
