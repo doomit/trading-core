@@ -26,6 +26,8 @@ def base_state():
             "current_stage": "PLAN_VALIDATED",
             "first_blocker_stage": "EXECUTOR_RECEIVED",
             "terminal_reason": None,
+            "brain_plan_latency_ms": 4200,
+            "executor_pickup_latency_ms": None,
             "end_to_end_latency_ms": None,
         },
         "paper": {
@@ -52,6 +54,8 @@ def test_render_dashboard_shows_subsystems_event_progress_and_first_blocker():
     assert "PLAN_VALIDATED" in markdown
     assert "EXECUTOR_RECEIVED" in markdown
     assert "First blocker" in markdown
+    assert "**Brain → plan latency:** 4200 ms" in markdown
+    assert "**Plan → executor pickup:** — ms" in markdown
     assert "$50,000.00" in markdown
     assert "$125.50" in markdown
 

@@ -54,6 +54,18 @@ def _terminal_required_stages(receipts: list[dict], terminal_receipt: dict) -> l
     return CANONICAL_STAGES[:CANONICAL_STAGES.index(terminal_stage) + 1]
 
 
+def _stage_latency_ms(receipts: list[dict], start_stage: str, end_stage: str) -> int | None:
+    starts = [_parse_time(x["occurred_at"]) for x in receipts if x["stage"] == start_stage]
+    ends = [_parse_time(x["occurred_at"]) for x in receipts if x["stage"] == end_stage]
+    if not starts or not ends:
+        return None
+    start = min(starts)
+    eligible_ends = [end for end in ends if end >= start]
+    if not eligible_ends:
+        return None
+    return int((min(eligible_ends) - start).total_seconds() * 1000)
+
+
 def _event_summary(event_id: str, receipts: list[dict]) -> dict:
     receipts = sorted(receipts, key=lambda x: _parse_time(x["occurred_at"])); current = max(receipts, key=lambda x: CANONICAL_STAGES.index(x["stage"])); current_index = CANONICAL_STAGES.index(current["stage"])
     completed = [x for x in receipts if x["stage"] == "COMPLETED"]
@@ -67,7 +79,18 @@ def _event_summary(event_id: str, receipts: list[dict]) -> dict:
     if terminal:
         reason = terminal.get("reason_code") or terminal.get("details", {}).get("terminal_reason")
         latency = int((_parse_time(terminal["occurred_at"]) - _parse_time(receipts[0]["occurred_at"])).total_seconds() * 1000)
-    return {"event_id": event_id, "plan_id": _last_non_null(receipts, "plan_id"), "symbol": _last_non_null(receipts, "symbol"), "decision": _decision(receipts), "current_stage": current["stage"], "first_blocker_stage": blocker, "terminal_reason": reason, "end_to_end_latency_ms": latency}
+    return {
+        "event_id": event_id,
+        "plan_id": _last_non_null(receipts, "plan_id"),
+        "symbol": _last_non_null(receipts, "symbol"),
+        "decision": _decision(receipts),
+        "current_stage": current["stage"],
+        "first_blocker_stage": blocker,
+        "terminal_reason": reason,
+        "brain_plan_latency_ms": _stage_latency_ms(receipts, "BRAIN_TRIGGERED", "PLAN_WRITTEN"),
+        "executor_pickup_latency_ms": _stage_latency_ms(receipts, "PLAN_WRITTEN", "EXECUTOR_RECEIVED"),
+        "end_to_end_latency_ms": latency,
+    }
 
 
 def _subsystem_state(activities: list[dict], paper: dict, generated_at: str) -> dict:
