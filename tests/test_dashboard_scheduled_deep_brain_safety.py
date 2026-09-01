@@ -1,4 +1,4 @@
-from trading_core.dashboard import build_dashboard_state
+from trading_core.dashboard import build_dashboard_state, validate_dashboard
 
 
 def paper():
@@ -31,6 +31,34 @@ def test_malformed_scheduled_deep_brain_is_a_blocker_not_an_exception():
     assert state["paper_ready"] is False
     assert "scheduled_deep_brain" in state["readiness_blockers"]
     assert state["scheduled_deep_brain"]["freshness"] == "STALE"
+
+
+def test_timezone_naive_scheduled_deep_brain_timestamp_fails_closed_not_with_exception():
+    heartbeat = {
+        "schema": "deep_brain_status_v1",
+        "state": "COMPLETE",
+        "paper_only": True,
+        "completed_at": "2026-08-30T15:30:00",
+        "next_expected_at": "2026-08-30T15:45:00-07:00",
+        "outputs": [],
+    }
+
+    state = build_dashboard_state(
+        [], paper(), "2026-08-30T15:31:00-07:00", scheduled_deep_brain=heartbeat
+    )
+
+    assert state["paper_ready"] is False
+    assert "scheduled_deep_brain" in state["readiness_blockers"]
+    assert state["scheduled_deep_brain"]["freshness"] == "STALE"
+    assert state["scheduled_deep_brain"]["updated_at"] is None
+    assert state["scheduled_deep_brain"]["age_seconds"] is None
+
+
+def test_dashboard_v1_remains_backward_compatible_without_scheduled_deep_brain_property():
+    state = build_dashboard_state([], paper(), "2026-08-30T15:31:00-07:00")
+    state.pop("scheduled_deep_brain")
+
+    validate_dashboard(state)
 
 
 def test_fresh_running_scheduled_deep_brain_is_visible_without_adding_its_blocker():
