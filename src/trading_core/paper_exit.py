@@ -134,6 +134,7 @@ def close_open_position(
     exit_receipt = _receipt(
         event_id=event_id,
         plan_id=plan_id,
+        plan_hash=plan_hash,
         stage="PAPER_EXIT_FILLED",
         status="PASS",
         source="paper_lifecycle",
@@ -144,6 +145,7 @@ def close_open_position(
     completed = _receipt(
         event_id=event_id,
         plan_id=plan_id,
+        plan_hash=plan_hash,
         stage="COMPLETED",
         status="PASS",
         source="azure_executor",
