@@ -141,6 +141,8 @@ def render_dashboard(state: dict) -> str:
                 f"**Current stage:** `{event['current_stage']}`  ",
                 f"**First blocker:** `{_cell(event.get('first_blocker_stage'))}`  ",
                 f"**Terminal reason:** {_cell(event.get('terminal_reason'))}  ",
+                f"**Brain → plan latency:** {_cell(event.get('brain_plan_latency_ms'))} ms  ",
+                f"**Plan → executor pickup:** {_cell(event.get('executor_pickup_latency_ms'))} ms  ",
                 f"**E2E latency:** {_cell(event.get('end_to_end_latency_ms'))} ms",
             ]
         )
