@@ -37,9 +37,12 @@ def _try_parse_time(value):
     if not isinstance(value, str):
         return None
     try:
-        return _parse_time(value)
+        parsed = _parse_time(value)
     except (TypeError, ValueError):
         return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed
 
 
 def _last_non_null(receipts: list[dict], key: str):
@@ -122,7 +125,9 @@ def _scheduled_deep_brain_state(heartbeat: dict, generated_at: str) -> tuple[dic
     state = heartbeat.get("state")
     updated_at = heartbeat.get("completed_at") if state in {"COMPLETE", "FAILED"} else heartbeat.get("started_at")
     updated_dt = _try_parse_time(updated_at)
-    age = max(0, int((now - updated_dt).total_seconds())) if updated_dt else None
+    if updated_dt is not None and updated_dt > now:
+        updated_dt = None
+    age = int((now - updated_dt).total_seconds()) if updated_dt else None
     trusted = heartbeat.get("schema") == "deep_brain_status_v1" and heartbeat.get("paper_only") is True and state in {"RUNNING", "COMPLETE", "FAILED"}
     fresh = False
     if trusted and state == "COMPLETE":
