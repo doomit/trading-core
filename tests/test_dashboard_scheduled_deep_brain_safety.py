@@ -75,6 +75,28 @@ def test_future_scheduled_deep_brain_timestamp_fails_closed():
     assert state["scheduled_deep_brain"]["age_seconds"] is None
 
 
+def test_identity_incomplete_complete_heartbeat_fails_closed_even_when_timestamps_are_fresh():
+    heartbeat = {
+        "schema": "deep_brain_status_v1",
+        "state": "COMPLETE",
+        "paper_only": True,
+        "run_id": "run-missing-identity",
+        "worker_id": "worker-2",
+        "completed_at": "2026-08-30T15:30:00-07:00",
+        "next_expected_at": "2026-08-30T15:45:00-07:00",
+        "outputs": [],
+    }
+
+    state = build_dashboard_state(
+        [], paper(), "2026-08-30T15:31:00-07:00", scheduled_deep_brain=heartbeat
+    )
+
+    assert state["paper_ready"] is False
+    assert "scheduled_deep_brain" in state["readiness_blockers"]
+    assert state["scheduled_deep_brain"]["freshness"] == "STALE"
+    assert state["scheduled_deep_brain"]["context_version"] is None
+
+
 def test_dashboard_v1_remains_backward_compatible_without_scheduled_deep_brain_property():
     state = build_dashboard_state([], paper(), "2026-08-30T15:31:00-07:00")
     state.pop("scheduled_deep_brain")
