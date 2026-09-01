@@ -1,6 +1,6 @@
 {
   "$schema":"https://json-schema.org/draft/2020-12/schema","$id":"trading_dashboard_v1.schema.json","title":"Trading E2E dashboard state v1","type":"object","additionalProperties":false,
-  "required":["schema","generated_at","overall_status","paper_ready","readiness_blockers","subsystems","feed_freshness","scheduled_deep_brain","paper","stuck_work","risk_rejects","recent_activity"],
+  "required":["schema","generated_at","overall_status","paper_ready","readiness_blockers","subsystems","feed_freshness","paper","stuck_work","risk_rejects","recent_activity"],
   "$defs":{
     "subsystem":{"type":"object","additionalProperties":false,"required":["status","updated_at","summary","age_seconds","freshness"],"properties":{"status":{"enum":["HEALTHY","WAITING","DEGRADED","FAILING"]},"updated_at":{"type":["string","null"],"format":"date-time"},"summary":{"type":"string","minLength":1,"maxLength":240},"age_seconds":{"type":["integer","null"],"minimum":0},"freshness":{"enum":["UNSEEN","FRESH","STALE"]}}},
     "feed_symbol":{"type":"object","additionalProperties":false,"required":["updated_at","age_seconds","freshness"],"properties":{"updated_at":{"type":["string","null"],"format":"date-time"},"age_seconds":{"type":["integer","null"],"minimum":0},"freshness":{"enum":["UNSEEN","FRESH","STALE"]}}},
