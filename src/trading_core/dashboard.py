@@ -45,6 +45,10 @@ def _try_parse_time(value):
     return parsed
 
 
+def _bounded_identity(value) -> bool:
+    return isinstance(value, str) and 0 < len(value) <= 200 and value.strip() == value
+
+
 def _last_non_null(receipts: list[dict], key: str):
     for receipt in reversed(receipts):
         value = receipt.get(key)
@@ -128,7 +132,12 @@ def _scheduled_deep_brain_state(heartbeat: dict, generated_at: str) -> tuple[dic
     if updated_dt is not None and updated_dt > now:
         updated_dt = None
     age = int((now - updated_dt).total_seconds()) if updated_dt else None
-    trusted = heartbeat.get("schema") == "deep_brain_status_v1" and heartbeat.get("paper_only") is True and state in {"RUNNING", "COMPLETE", "FAILED"}
+    trusted = (
+        heartbeat.get("schema") == "deep_brain_status_v1"
+        and heartbeat.get("paper_only") is True
+        and state in {"RUNNING", "COMPLETE", "FAILED"}
+        and _bounded_identity(heartbeat.get("context_version"))
+    )
     fresh = False
     if trusted and state == "COMPLETE":
         next_expected = _try_parse_time(heartbeat.get("next_expected_at"))
