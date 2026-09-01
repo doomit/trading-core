@@ -97,7 +97,6 @@ def _feed_freshness(activities: list[dict], generated_at: str) -> dict[str, dict
         symbol = activity.get("symbol")
         if activity.get("source") == "github_feed" and symbol in EXPECTED_FEED_SYMBOLS:
             latest_by_symbol[symbol] = activity
-
     result = {}
     for symbol in EXPECTED_FEED_SYMBOLS:
         activity = latest_by_symbol.get(symbol)
@@ -109,6 +108,33 @@ def _feed_freshness(activities: list[dict], generated_at: str) -> dict[str, dict
     return result
 
 
+def _scheduled_deep_brain_state(heartbeat: dict, generated_at: str) -> tuple[dict, bool]:
+    now = _parse_time(generated_at)
+    state = heartbeat.get("state")
+    updated_at = heartbeat.get("completed_at") if state in {"COMPLETE", "FAILED"} else heartbeat.get("started_at")
+    age = max(0, int((now - _parse_time(updated_at)).total_seconds())) if updated_at else None
+    trusted = heartbeat.get("schema") == "deep_brain_status_v1" and heartbeat.get("paper_only") is True and state in {"RUNNING", "COMPLETE", "FAILED"}
+    fresh = False
+    if trusted and state == "COMPLETE" and heartbeat.get("next_expected_at"):
+        fresh = now <= _parse_time(heartbeat["next_expected_at"])
+    elif trusted and state == "RUNNING" and heartbeat.get("lease_expires_at"):
+        fresh = now <= _parse_time(heartbeat["lease_expires_at"])
+    projection = {
+        "state": state if state in {"RUNNING", "COMPLETE", "FAILED"} else "FAILED",
+        "freshness": "FRESH" if fresh else "STALE",
+        "context_version": heartbeat.get("context_version"),
+        "last_completed_context_version": heartbeat.get("last_completed_context_version"),
+        "updated_at": updated_at,
+        "next_expected_at": heartbeat.get("next_expected_at"),
+        "age_seconds": age,
+        "run_id": heartbeat.get("run_id"),
+        "worker_id": heartbeat.get("worker_id"),
+        "outputs_count": len(heartbeat.get("outputs") or []),
+        "skipped_symbols": [x.get("symbol") for x in (heartbeat.get("skipped_symbols") or []) if isinstance(x, dict) and x.get("symbol")],
+    }
+    return projection, fresh
+
+
 def _overall_status(subsystems: dict) -> str:
     statuses = {x["status"] for x in subsystems.values()}
     for value in ("FAILING", "DEGRADED", "WAITING"):
@@ -116,7 +142,7 @@ def _overall_status(subsystems: dict) -> str:
     return "HEALTHY"
 
 
-def build_dashboard_state(activities: list[dict], paper: dict, generated_at: str) -> dict:
+def build_dashboard_state(activities: list[dict], paper: dict, generated_at: str, scheduled_deep_brain: dict | None = None) -> dict:
     ordered = sorted(activities, key=lambda x: _parse_time(x["occurred_at"])); now = _parse_time(generated_at); by_event = defaultdict(list)
     for activity in ordered: by_event[activity["event_id"]].append(activity)
     summaries = {eid: _event_summary(eid, receipts) for eid, receipts in by_event.items()}
@@ -134,11 +160,15 @@ def build_dashboard_state(activities: list[dict], paper: dict, generated_at: str
     risk_rejects = [{"event_id": x["event_id"], "occurred_at": x["occurred_at"], "reason_code": x.get("reason_code")} for x in ordered if x["stage"] == "RISK_DECIDED" and x["status"] == "REJECTED"][-10:]
     blockers = [name for name, state in subsystems.items() if state["status"] != "HEALTHY"]
     blockers.extend(f"market_feed:{symbol}" for symbol, state in feed_freshness.items() if state["freshness"] != "FRESH")
+    deep_projection = None
+    if scheduled_deep_brain is not None:
+        deep_projection, deep_fresh = _scheduled_deep_brain_state(scheduled_deep_brain, generated_at)
+        if not deep_fresh: blockers.append("scheduled_deep_brain")
     if paper.get("paused"): blockers.append("paper_paused")
     if paper.get("kill_switch"): blockers.append("kill_switch")
     if stuck: blockers.append("stuck_work")
     blockers = list(dict.fromkeys(blockers))
-    return {"schema": "trading_dashboard_v1", "generated_at": generated_at, "overall_status": _overall_status(subsystems), "paper_ready": not blockers, "readiness_blockers": blockers, "subsystems": subsystems, "feed_freshness": feed_freshness, "current_event": current_event, "paper": dict(paper), "stuck_work": stuck, "risk_rejects": risk_rejects, "recent_activity": ordered[-20:]}
+    return {"schema": "trading_dashboard_v1", "generated_at": generated_at, "overall_status": _overall_status(subsystems), "paper_ready": not blockers, "readiness_blockers": blockers, "subsystems": subsystems, "feed_freshness": feed_freshness, "scheduled_deep_brain": deep_projection, "current_event": current_event, "paper": dict(paper), "stuck_work": stuck, "risk_rejects": risk_rejects, "recent_activity": ordered[-20:]}
 
 
 __all__ = ["CANONICAL_STAGES", "build_dashboard_state", "dashboard_validator", "load_dashboard_schema", "validate_dashboard"]
