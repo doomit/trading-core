@@ -54,6 +54,27 @@ def test_timezone_naive_scheduled_deep_brain_timestamp_fails_closed_not_with_exc
     assert state["scheduled_deep_brain"]["age_seconds"] is None
 
 
+def test_future_scheduled_deep_brain_timestamp_fails_closed():
+    heartbeat = {
+        "schema": "deep_brain_status_v1",
+        "state": "COMPLETE",
+        "paper_only": True,
+        "completed_at": "2026-08-30T15:32:00-07:00",
+        "next_expected_at": "2026-08-30T15:45:00-07:00",
+        "outputs": [],
+    }
+
+    state = build_dashboard_state(
+        [], paper(), "2026-08-30T15:31:00-07:00", scheduled_deep_brain=heartbeat
+    )
+
+    assert state["paper_ready"] is False
+    assert "scheduled_deep_brain" in state["readiness_blockers"]
+    assert state["scheduled_deep_brain"]["freshness"] == "STALE"
+    assert state["scheduled_deep_brain"]["updated_at"] is None
+    assert state["scheduled_deep_brain"]["age_seconds"] is None
+
+
 def test_dashboard_v1_remains_backward_compatible_without_scheduled_deep_brain_property():
     state = build_dashboard_state([], paper(), "2026-08-30T15:31:00-07:00")
     state.pop("scheduled_deep_brain")
