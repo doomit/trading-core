@@ -173,6 +173,7 @@ def build_dashboard_state(activities: list[dict], paper: dict, generated_at: str
     blockers = [name for name, state in subsystems.items() if state["status"] != "HEALTHY"]
     blockers.extend(f"market_feed:{symbol}" for symbol, state in feed_freshness.items() if state["freshness"] != "FRESH")
     deep_projection = None
+    deep_fresh = None
     if scheduled_deep_brain is not None:
         deep_projection, deep_fresh = _scheduled_deep_brain_state(scheduled_deep_brain, generated_at)
         if not deep_fresh: blockers.append("scheduled_deep_brain")
@@ -180,7 +181,9 @@ def build_dashboard_state(activities: list[dict], paper: dict, generated_at: str
     if paper.get("kill_switch"): blockers.append("kill_switch")
     if stuck: blockers.append("stuck_work")
     blockers = list(dict.fromkeys(blockers))
-    return {"schema": "trading_dashboard_v1", "generated_at": generated_at, "overall_status": _overall_status(subsystems), "paper_ready": not blockers, "readiness_blockers": blockers, "subsystems": subsystems, "feed_freshness": feed_freshness, "scheduled_deep_brain": deep_projection, "current_event": current_event, "paper": dict(paper), "stuck_work": stuck, "risk_rejects": risk_rejects, "recent_activity": ordered[-20:]}
+    overall_status = _overall_status(subsystems)
+    if deep_fresh is False and overall_status == "HEALTHY": overall_status = "DEGRADED"
+    return {"schema": "trading_dashboard_v1", "generated_at": generated_at, "overall_status": overall_status, "paper_ready": not blockers, "readiness_blockers": blockers, "subsystems": subsystems, "feed_freshness": feed_freshness, "scheduled_deep_brain": deep_projection, "current_event": current_event, "paper": dict(paper), "stuck_work": stuck, "risk_rejects": risk_rejects, "recent_activity": ordered[-20:]}
 
 
 __all__ = ["CANONICAL_STAGES", "build_dashboard_state", "dashboard_validator", "load_dashboard_schema", "validate_dashboard"]
