@@ -6,6 +6,7 @@
   "additionalProperties": false,
   "required": [
     "schema", "thesis_id", "created_at", "valid_until", "symbol", "source",
+    "config_version", "strategy_profile",
     "regime", "setup_candidates", "supporting_evidence", "contrary_evidence",
     "key_levels", "invalidation", "watch_conditions", "confidence", "paper_only"
   ],
@@ -16,6 +17,8 @@
     "valid_until": {"type": "string", "format": "date-time"},
     "symbol": {"type": "string", "minLength": 1},
     "source": {"enum": ["DEEP_SCHEDULER", "EVENT_BRAIN"]},
+    "config_version": {"type": "string", "minLength": 1},
+    "strategy_profile": {"type": "string", "minLength": 1},
     "parent_thesis_id": {"type": ["string", "null"]},
     "based_on_state_version": {"type": ["string", "integer", "null"]},
     "regime": {
