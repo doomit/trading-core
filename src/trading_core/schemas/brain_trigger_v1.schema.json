@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "brain_trigger_v1.schema.json",
+  "title": "Brain Trigger v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "event_id", "timestamp", "symbol", "trigger_source",
+    "brain_tier", "anomaly", "baseline", "market_context", "scheduler",
+    "budget", "paper_only"
+  ],
+  "properties": {
+    "schema": {"const": "brain_trigger_v1"},
+    "event_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "symbol": {"type": "string", "minLength": 1},
+    "trigger_source": {"const": "azure_anomaly_dispatch"},
+    "brain_tier": {"enum": ["L1", "L2", "L3"]},
+    "anomaly": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["rule_id", "severity", "reason"],
+      "properties": {
+        "rule_id": {"type": "string", "minLength": 1},
+        "severity": {"enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]},
+        "reason": {"type": "string", "minLength": 1},
+        "observed_at": {"type": ["string", "null"], "format": "date-time"}
+      }
+    },
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["thesis_id", "plan_id"],
+      "properties": {
+        "thesis_id": {"type": "string", "minLength": 1},
+        "plan_id": {"type": ["string", "null"]}
+      }
+    },
+    "market_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "branch", "path", "version"],
+      "properties": {
+        "repository": {"const": "doomit/trading-runtime"},
+        "branch": {"const": "gpt-runtime"},
+        "path": {"const": "runtime/market-context/current.json"},
+        "version": {"type": ["string", "integer"]}
+      }
+    },
+    "scheduler": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["minutes_to_next_deep", "state"],
+      "properties": {
+        "minutes_to_next_deep": {"type": "number", "minimum": 0, "maximum": 15},
+        "state": {"enum": ["IDLE", "RUNNING", "COMPLETE", "LATE", "UNKNOWN"]}
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["events_this_hour", "soft_cap", "hard_cap"],
+      "properties": {
+        "events_this_hour": {"type": "integer", "minimum": 0},
+        "soft_cap": {"type": "integer", "minimum": 1},
+        "hard_cap": {"type": "integer", "minimum": 2}
+      }
+    },
+    "coalesced_state_version": {"type": ["string", "integer", "null"]},
+    "paper_only": {"const": true}
+  }
+}

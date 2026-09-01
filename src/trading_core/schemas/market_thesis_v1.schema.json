@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "market_thesis_v1.schema.json",
+  "title": "Market Thesis v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "thesis_id", "created_at", "valid_until", "symbol", "source",
+    "regime", "setup_candidates", "supporting_evidence", "contrary_evidence",
+    "key_levels", "invalidation", "watch_conditions", "confidence", "paper_only"
+  ],
+  "properties": {
+    "schema": {"const": "market_thesis_v1"},
+    "thesis_id": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "valid_until": {"type": "string", "format": "date-time"},
+    "symbol": {"type": "string", "minLength": 1},
+    "source": {"enum": ["DEEP_SCHEDULER", "EVENT_BRAIN"]},
+    "parent_thesis_id": {"type": ["string", "null"]},
+    "based_on_state_version": {"type": ["string", "integer", "null"]},
+    "regime": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["label"],
+      "properties": {"label": {"type": "string", "minLength": 1}}
+    },
+    "setup_candidates": {"type": "array", "items": {"type": "string"}},
+    "supporting_evidence": {"type": "array", "items": {"type": "string"}},
+    "contrary_evidence": {"type": "array", "items": {"type": "string"}},
+    "key_levels": {"type": "object", "additionalProperties": true},
+    "invalidation": {"type": "array", "items": {"$ref": "#/$defs/condition"}},
+    "watch_conditions": {"type": "array", "items": {"$ref": "#/$defs/condition"}},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "paper_only": {"const": true}
+  },
+  "$defs": {
+    "condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule_id", "metric", "comparator", "threshold", "timeframe", "close_only", "severity", "brain_tier", "reason"],
+      "properties": {
+        "rule_id": {"type": "string", "minLength": 1},
+        "metric": {"type": "string", "minLength": 1},
+        "comparator": {"enum": ["GT", "GTE", "LT", "LTE", "CROSS_ABOVE", "CROSS_BELOW"]},
+        "threshold": {
+          "oneOf": [
+            {"type": "number"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["metric"],
+              "properties": {"metric": {"type": "string", "minLength": 1}}
+            }
+          ]
+        },
+        "timeframe": {"enum": ["1m", "5m"]},
+        "close_only": {"type": "boolean"},
+        "severity": {"enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]},
+        "brain_tier": {"enum": ["L0", "L1", "L2", "L3"]},
+        "reason": {"type": "string", "minLength": 1},
+        "cooldown_seconds": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}
