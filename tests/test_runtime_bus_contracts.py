@@ -62,6 +62,31 @@ def _news(**overrides):
     return value
 
 
+def _thesis(**overrides):
+    value = {
+        "schema": "market_thesis_v1",
+        "thesis_id": "deep-ctx-1-mes",
+        "created_at": "2026-09-01T08:45:00Z",
+        "valid_until": "2026-09-01T09:05:00Z",
+        "symbol": "MES1!",
+        "source": "DEEP_SCHEDULER",
+        "based_on_state_version": "ctx-1",
+        "config_version": "cfg_pa_aggressive_a2_1m_20260901_001",
+        "strategy_profile": "PA_AGGRESSIVE_A2",
+        "regime": {"label": "BEAR_TREND"},
+        "setup_candidates": [],
+        "supporting_evidence": [],
+        "contrary_evidence": [],
+        "key_levels": {},
+        "invalidation": [],
+        "watch_conditions": [],
+        "confidence": 0.5,
+        "paper_only": True,
+    }
+    value.update(overrides)
+    return value
+
+
 def test_public_core_owns_plan_event_and_news_json_schemas():
     validate(_plan(), _schema("trading_plan_v1.schema.json"))
     validate(_event(), _schema("trading_event_v1.schema.json"))
@@ -71,6 +96,19 @@ def test_public_core_owns_plan_event_and_news_json_schemas():
         validate(_plan(decision="BUY"), _schema("trading_plan_v1.schema.json"))
     with pytest.raises(ValidationError):
         validate(_news(source_url="not-a-url"), _schema("market_news_v1.schema.json"))
+
+
+def test_market_thesis_requires_runtime_config_identity():
+    validate(_thesis(), _schema("market_thesis_v1.schema.json"))
+
+    with pytest.raises(ValidationError):
+        validate(_thesis(config_version=""), _schema("market_thesis_v1.schema.json"))
+    with pytest.raises(ValidationError):
+        validate(_thesis(strategy_profile=""), _schema("market_thesis_v1.schema.json"))
+    without_config = _thesis()
+    del without_config["config_version"]
+    with pytest.raises(ValidationError):
+        validate(without_config, _schema("market_thesis_v1.schema.json"))
 
 
 def test_news_context_semantics_live_in_core_and_fail_closed():
