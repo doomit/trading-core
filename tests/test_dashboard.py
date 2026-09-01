@@ -56,7 +56,23 @@ def test_completed_no_trade_has_no_blocker_and_computed_latency():
     assert event["current_stage"] == "COMPLETED"
     assert event["first_blocker_stage"] is None
     assert event["terminal_reason"] == "NO_TRADE"
+    assert event["brain_plan_latency_ms"] == 4000
+    assert event["executor_pickup_latency_ms"] == 3000
     assert event["end_to_end_latency_ms"] == 13000
+    validate_dashboard(state)
+
+
+def test_latency_breakdown_is_null_when_boundary_receipt_is_missing():
+    activities = [
+        receipt("evt-latency-gap", "EVENT_CREATED", "2026-08-30T15:00:00-07:00", "azure_event_producer"),
+        receipt("evt-latency-gap", "BRAIN_TRIGGERED", "2026-08-30T15:00:05-07:00", "chatgpt_event_task"),
+        receipt("evt-latency-gap", "PLAN_VALIDATED", "2026-08-30T15:00:10-07:00", "github_validation", plan_id="plan-gap"),
+        receipt("evt-latency-gap", "EXECUTOR_RECEIVED", "2026-08-30T15:00:12-07:00", "azure_executor", plan_id="plan-gap"),
+    ]
+    state = build_dashboard_state(activities, paper(), "2026-08-30T15:00:14-07:00")
+    event = state["current_event"]
+    assert event["brain_plan_latency_ms"] is None
+    assert event["executor_pickup_latency_ms"] is None
     validate_dashboard(state)
 
 
