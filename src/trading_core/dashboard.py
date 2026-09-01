@@ -33,6 +33,15 @@ def _parse_time(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+def _try_parse_time(value):
+    if not isinstance(value, str):
+        return None
+    try:
+        return _parse_time(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _last_non_null(receipts: list[dict], key: str):
     for receipt in reversed(receipts):
         value = receipt.get(key)
@@ -112,20 +121,23 @@ def _scheduled_deep_brain_state(heartbeat: dict, generated_at: str) -> tuple[dic
     now = _parse_time(generated_at)
     state = heartbeat.get("state")
     updated_at = heartbeat.get("completed_at") if state in {"COMPLETE", "FAILED"} else heartbeat.get("started_at")
-    age = max(0, int((now - _parse_time(updated_at)).total_seconds())) if updated_at else None
+    updated_dt = _try_parse_time(updated_at)
+    age = max(0, int((now - updated_dt).total_seconds())) if updated_dt else None
     trusted = heartbeat.get("schema") == "deep_brain_status_v1" and heartbeat.get("paper_only") is True and state in {"RUNNING", "COMPLETE", "FAILED"}
     fresh = False
-    if trusted and state == "COMPLETE" and heartbeat.get("next_expected_at"):
-        fresh = now <= _parse_time(heartbeat["next_expected_at"])
-    elif trusted and state == "RUNNING" and heartbeat.get("lease_expires_at"):
-        fresh = now <= _parse_time(heartbeat["lease_expires_at"])
+    if trusted and state == "COMPLETE":
+        next_expected = _try_parse_time(heartbeat.get("next_expected_at"))
+        fresh = updated_dt is not None and next_expected is not None and now <= next_expected
+    elif trusted and state == "RUNNING":
+        lease_expires = _try_parse_time(heartbeat.get("lease_expires_at"))
+        fresh = updated_dt is not None and lease_expires is not None and now <= lease_expires
     projection = {
         "state": state if state in {"RUNNING", "COMPLETE", "FAILED"} else "FAILED",
         "freshness": "FRESH" if fresh else "STALE",
         "context_version": heartbeat.get("context_version"),
         "last_completed_context_version": heartbeat.get("last_completed_context_version"),
-        "updated_at": updated_at,
-        "next_expected_at": heartbeat.get("next_expected_at"),
+        "updated_at": updated_at if updated_dt else None,
+        "next_expected_at": heartbeat.get("next_expected_at") if _try_parse_time(heartbeat.get("next_expected_at")) else None,
         "age_seconds": age,
         "run_id": heartbeat.get("run_id"),
         "worker_id": heartbeat.get("worker_id"),
