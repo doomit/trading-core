@@ -86,3 +86,52 @@ def test_newest_event_wins_and_recent_activity_is_capped():
     assert len(state["recent_activity"]) == 20
     assert state["recent_activity"][0]["event_id"] == "evt-5"
     assert state["recent_activity"][-1]["event_id"] == "evt-24"
+
+
+def test_stale_scheduled_deep_brain_blocks_paper_readiness_and_is_projected():
+    heartbeat = {
+        "schema": "deep_brain_status_v1",
+        "state": "COMPLETE",
+        "run_id": "deep-run-1",
+        "worker_id": "agent_chatgpt_worker_3",
+        "started_at": "2026-08-30T15:00:00-07:00",
+        "completed_at": "2026-08-30T15:04:00-07:00",
+        "context_version": "ctx-old",
+        "last_completed_context_version": "ctx-old",
+        "as_of_5m": 1788120000000,
+        "next_expected_at": "2026-08-30T15:15:00-07:00",
+        "outputs": [
+            {
+                "symbol": "MES1!",
+                "thesis_id": "thesis-1",
+                "plan_id": "plan-1",
+                "analysis_id": "analysis-1",
+                "context_version": "ctx-old",
+            }
+        ],
+        "skipped_symbols": [{"symbol": "MNQ1!", "reason": "missing context"}],
+        "paper_only": True,
+    }
+
+    state = build_dashboard_state(
+        [],
+        paper(),
+        "2026-08-30T15:31:00-07:00",
+        scheduled_deep_brain=heartbeat,
+    )
+
+    assert state["paper_ready"] is False
+    assert "scheduled_deep_brain" in state["readiness_blockers"]
+    assert state["scheduled_deep_brain"] == {
+        "state": "COMPLETE",
+        "freshness": "STALE",
+        "context_version": "ctx-old",
+        "last_completed_context_version": "ctx-old",
+        "updated_at": "2026-08-30T15:04:00-07:00",
+        "next_expected_at": "2026-08-30T15:15:00-07:00",
+        "age_seconds": 1620,
+        "run_id": "deep-run-1",
+        "worker_id": "agent_chatgpt_worker_3",
+        "outputs_count": 1,
+        "skipped_symbols": ["MNQ1!"],
+    }
