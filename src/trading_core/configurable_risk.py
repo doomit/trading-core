@@ -4,7 +4,6 @@ from decimal import Decimal
 from typing import Any
 
 from .paper_execution import (
-    MAX_FEED_AGE_SECONDS,
     ROUND_TURN_COMMISSION_USD,
     OrderIntent,
     RiskDecision,
@@ -61,7 +60,7 @@ class ConfigurableRiskGateway:
         feed_age = Decimal(str((context.now - market.feed_as_of).total_seconds()))
         if feed_age < 0:
             return self._reject("FEED_TIME_IN_FUTURE")
-        if feed_age > MAX_FEED_AGE_SECONDS:
+        if feed_age > Decimal(cfg.risk.max_feed_age_seconds):
             return self._reject("STALE_FEED")
 
         if account.daily_realized_pnl_usd <= -cfg.risk.max_daily_realized_loss_usd:
