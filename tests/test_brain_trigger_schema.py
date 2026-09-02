@@ -61,3 +61,13 @@ def test_brain_trigger_rejects_negative_remaining_capacity():
     value["account_capacity"]["remaining_open_micro_contracts"] = -1
     with pytest.raises(ValidationError):
         validate(value, _schema())
+
+
+def test_brain_trigger_accepts_explicit_capacity_enrichment_failure_status():
+    value = _trigger()
+    del value["account_capacity"]
+    value["account_capacity_status"] = {
+        "status": "UNAVAILABLE",
+        "reason_code": "ENRICHMENT_FAILED",
+    }
+    validate(value, _schema())
