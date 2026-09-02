@@ -31,6 +31,7 @@ def _plan():
         "position_action": {
             "quantity": 1,
             "protective_stop": {"price": "5990.00"},
+            "take_profit": {"price": "6005.00"},
         },
     }
 
