@@ -283,6 +283,10 @@ class RiskGateway:
             stop_price = _decimal(stop["price"], "protective_stop.price")
         except ValueError:
             return RiskDecision(False, "INVALID_PROTECTIVE_STOP")
+        try:
+            _decimal(target["price"], "take_profit.price")
+        except ValueError:
+            return RiskDecision(False, "INVALID_TAKE_PROFIT")
         quantity = action.get("quantity")
         if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
             return RiskDecision(False, "INVALID_ORDER_QUANTITY")
