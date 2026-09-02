@@ -9,6 +9,20 @@
     "brain_tier", "anomaly", "baseline", "market_context", "scheduler",
     "budget", "paper_only"
   ],
+  "allOf": [
+    {
+      "if": {
+        "required": ["account_capacity_status"],
+        "properties": {
+          "account_capacity_status": {
+            "properties": {"state": {"const": "AVAILABLE"}},
+            "required": ["state"]
+          }
+        }
+      },
+      "then": {"required": ["account_capacity"]}
+    }
+  ],
   "properties": {
     "schema": {"const": "brain_trigger_v1"},
     "event_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$"},
@@ -94,6 +108,18 @@
         "remaining_loss_streak": {"type": "integer", "minimum": 0},
         "target_risk_per_trade_usd": {"type": "number", "exclusiveMinimum": 0},
         "max_risk_per_trade_usd": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "account_capacity_status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "reason"],
+      "properties": {
+        "state": {"enum": ["AVAILABLE", "UNAVAILABLE"]},
+        "reason": {
+          "type": ["string", "null"],
+          "enum": [null, "capacity_enrichment_failed"]
+        }
       }
     },
     "coalesced_state_version": {"type": ["string", "integer", "null"]},
