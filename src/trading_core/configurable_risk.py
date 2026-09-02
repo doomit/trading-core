@@ -114,11 +114,9 @@ class ConfigurableRiskGateway:
         except ValueError:
             return self._reject("INVALID_TAKE_PROFIT")
 
-        quantity = action.get("quantity")
-        if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
+        requested_quantity = action.get("quantity")
+        if isinstance(requested_quantity, bool) or not isinstance(requested_quantity, int) or requested_quantity < 1:
             return self._reject("INVALID_ORDER_QUANTITY")
-        if account.open_contracts_total + quantity > cfg.risk.max_open_micro_contracts:
-            return self._reject("POSITION_LIMIT_EXCEEDED")
 
         try:
             created_at = _parse_time(plan.get("created_at"), "created_at")
@@ -146,14 +144,22 @@ class ConfigurableRiskGateway:
             if target_price >= expected_fill:
                 return self._reject("INVALID_TAKE_PROFIT_DIRECTION")
 
-        actual_risk = (
-            abs(expected_fill - stop_price) * instrument["point_value"] * quantity
-            + ROUND_TURN_COMMISSION_USD * quantity
+        per_contract_risk = (
+            abs(expected_fill - stop_price) * instrument["point_value"]
+            + ROUND_TURN_COMMISSION_USD
         )
-        if actual_risk > cfg.risk.max_risk_per_trade_usd:
+        if per_contract_risk > cfg.risk.max_risk_per_trade_usd:
             return self._reject("MAX_TRADE_RISK_EXCEEDED")
-        if actual_risk > risk_budget:
+        if per_contract_risk > risk_budget:
             return self._reject("PLAN_RISK_BUDGET_EXCEEDED")
+
+        remaining_capacity = cfg.risk.max_open_micro_contracts - account.open_contracts_total
+        max_by_hard_risk = int(cfg.risk.max_risk_per_trade_usd // per_contract_risk)
+        max_by_plan_risk = int(risk_budget // per_contract_risk)
+        quantity = min(requested_quantity, remaining_capacity, max_by_hard_risk, max_by_plan_risk)
+        if quantity < 1:
+            return self._reject("POSITION_LIMIT_REACHED")
+        actual_risk = per_contract_risk * quantity
 
         return RiskDecision(
             True,
