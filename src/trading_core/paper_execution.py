@@ -284,7 +284,7 @@ class RiskGateway:
         except ValueError:
             return RiskDecision(False, "INVALID_PROTECTIVE_STOP")
         try:
-            _decimal(target["price"], "take_profit.price")
+            target_price = _decimal(target["price"], "take_profit.price")
         except ValueError:
             return RiskDecision(False, "INVALID_TAKE_PROFIT")
         quantity = action.get("quantity")
@@ -307,6 +307,10 @@ class RiskGateway:
             return RiskDecision(False, "INVALID_PROTECTIVE_STOP_DIRECTION")
         if decision == "SHORT" and stop_price <= expected_fill:
             return RiskDecision(False, "INVALID_PROTECTIVE_STOP_DIRECTION")
+        if decision == "LONG" and target_price <= expected_fill:
+            return RiskDecision(False, "INVALID_TAKE_PROFIT_DIRECTION")
+        if decision == "SHORT" and target_price >= expected_fill:
+            return RiskDecision(False, "INVALID_TAKE_PROFIT_DIRECTION")
         risk_usd = abs(expected_fill - stop_price) * instrument["point_value"] * quantity + ROUND_TURN_COMMISSION_USD * quantity
         if risk_usd > MAX_RISK_PER_TRADE_USD:
             return RiskDecision(False, "MAX_TRADE_RISK_EXCEEDED")
