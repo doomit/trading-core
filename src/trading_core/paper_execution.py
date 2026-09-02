@@ -276,6 +276,9 @@ class RiskGateway:
         stop = action.get("protective_stop")
         if not isinstance(stop, dict) or "price" not in stop:
             return RiskDecision(False, "MISSING_PROTECTIVE_STOP")
+        target = action.get("take_profit")
+        if not isinstance(target, dict) or "price" not in target:
+            return RiskDecision(False, "MISSING_TAKE_PROFIT")
         try:
             stop_price = _decimal(stop["price"], "protective_stop.price")
         except ValueError:
