@@ -137,28 +137,47 @@ def test_plan_must_bind_exact_active_config_and_complete_directional_risk_contra
     assert evaluate(document).reason_code == reason
 
 
-def test_actual_risk_cannot_exceed_plan_budget_even_below_global_hard_cap():
+def test_actual_risk_is_downsized_to_plan_budget_instead_of_rejected():
     document = plan(position_action={"quantity": 10, "protective_stop": {"price": "5990"}, "take_profit": {"price": "6010"}})
     decision = evaluate(document)
-    assert decision.approved is False
-    assert decision.reason_code == "PLAN_RISK_BUDGET_EXCEEDED"
+    assert decision.approved is True
+    assert decision.reason_code == "RISK_APPROVED"
+    assert decision.intent.quantity == 9
+    assert decision.intent.risk_usd == Decimal("483.75")
 
 
-def test_actual_risk_cannot_exceed_config_hard_cap():
+def test_actual_risk_is_downsized_to_config_hard_cap_instead_of_rejected():
     document = plan(
         risk_budget_usd=1000,
         position_action={"quantity": 20, "protective_stop": {"price": "5990"}, "take_profit": {"price": "6010"}},
     )
     decision = evaluate(document)
-    assert decision.approved is False
-    assert decision.reason_code == "MAX_TRADE_RISK_EXCEEDED"
+    assert decision.approved is True
+    assert decision.reason_code == "RISK_APPROVED"
+    assert decision.intent.quantity == 18
+    assert decision.intent.risk_usd == Decimal("967.50")
 
 
-def test_total_open_plus_requested_quantity_cannot_exceed_config_capacity():
-    document = plan(position_action={"quantity": 20, "protective_stop": {"price": "5998.25"}, "take_profit": {"price": "6005"}})
+def test_requested_quantity_is_downsized_to_remaining_config_capacity():
+    document = plan(
+        risk_budget_usd=1000,
+        position_action={"quantity": 20, "protective_stop": {"price": "5998.25"}, "take_profit": {"price": "6005"}},
+    )
     decision = evaluate(document, risk_context=context(account_state=account(open_contracts_total=1)))
+    assert decision.approved is True
+    assert decision.reason_code == "RISK_APPROVED"
+    assert decision.intent.quantity == 19
+    assert decision.intent.risk_usd == Decimal("237.50")
+
+
+def test_one_micro_that_exceeds_plan_budget_is_still_rejected_fail_closed():
+    document = plan(
+        risk_budget_usd=10,
+        position_action={"quantity": 5, "protective_stop": {"price": "5990"}, "take_profit": {"price": "6010"}},
+    )
+    decision = evaluate(document)
     assert decision.approved is False
-    assert decision.reason_code == "POSITION_LIMIT_EXCEEDED"
+    assert decision.reason_code == "PLAN_RISK_BUDGET_EXCEEDED"
 
 
 @pytest.mark.parametrize(
