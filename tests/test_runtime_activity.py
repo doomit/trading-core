@@ -46,6 +46,18 @@ def test_plan_stages_require_plan_id():
     )
 
 
+def test_paper_exit_receipt_matches_the_public_runtime_activity_contract():
+    validate_runtime_activity(
+        activity(
+            receipt_id="paper-exit-evt-1",
+            stage="PAPER_EXIT_FILLED",
+            source="paper_lifecycle",
+            plan_id="evt-1",
+            details={"decision": "LONG"},
+        )
+    )
+
+
 def test_occurred_at_must_be_timezone_aware_iso_timestamp():
     with pytest.raises((ValidationError, ValueError)):
         validate_runtime_activity(activity(occurred_at="2026-08-31T00:30:00"))
