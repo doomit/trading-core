@@ -29,6 +29,7 @@ def test_future_next_bar_is_rejected_before_broker_execution():
         "position_action": {
             "quantity": 1,
             "protective_stop": {"price": "5990.00"},
+            "take_profit": {"price": "6005.00"},
         },
     }
     context = RiskContext(
