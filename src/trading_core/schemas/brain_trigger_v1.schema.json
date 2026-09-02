@@ -66,6 +66,36 @@
         "hard_cap": {"type": "integer", "minimum": 2}
       }
     },
+    "account_capacity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode", "config_version",
+        "open_contracts_total", "max_open_micro_contracts", "remaining_open_micro_contracts",
+        "entries_this_session", "max_entries_per_session", "remaining_entries_this_session",
+        "daily_realized_pnl_usd", "max_daily_realized_loss_usd", "remaining_daily_loss_usd",
+        "consecutive_failures", "max_consecutive_losses", "remaining_loss_streak",
+        "target_risk_per_trade_usd", "max_risk_per_trade_usd"
+      ],
+      "properties": {
+        "mode": {"const": "PAPER"},
+        "config_version": {"type": "string", "minLength": 1},
+        "open_contracts_total": {"type": "integer", "minimum": 0},
+        "max_open_micro_contracts": {"type": "integer", "minimum": 1},
+        "remaining_open_micro_contracts": {"type": "integer", "minimum": 0},
+        "entries_this_session": {"type": "integer", "minimum": 0},
+        "max_entries_per_session": {"type": "integer", "minimum": 1},
+        "remaining_entries_this_session": {"type": "integer", "minimum": 0},
+        "daily_realized_pnl_usd": {"type": "number"},
+        "max_daily_realized_loss_usd": {"type": "number", "exclusiveMinimum": 0},
+        "remaining_daily_loss_usd": {"type": "number", "minimum": 0},
+        "consecutive_failures": {"type": "integer", "minimum": 0},
+        "max_consecutive_losses": {"type": "integer", "minimum": 1},
+        "remaining_loss_streak": {"type": "integer", "minimum": 0},
+        "target_risk_per_trade_usd": {"type": "number", "exclusiveMinimum": 0},
+        "max_risk_per_trade_usd": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
     "coalesced_state_version": {"type": ["string", "integer", "null"]},
     "paper_only": {"const": true}
   }
