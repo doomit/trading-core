@@ -90,6 +90,16 @@ def test_directional_plan_requires_take_profit_for_terminal_bracket_lifecycle(de
     assert broker.calls==0
 
 
+def test_directional_plan_rejects_non_numeric_take_profit_before_broker_execution():
+    broker=CountingPaperBroker()
+    result=execute(plan(position_action={"quantity":1,"protective_stop":{"price":"5990.00"},"take_profit":{"price":"not-a-price"}}), broker=broker)
+    assert result.status=="REJECTED"
+    assert result.reason_code=="INVALID_TAKE_PROFIT"
+    assert result.order is None
+    assert result.fill is None
+    assert broker.calls==0
+
+
 @pytest.mark.parametrize("risk_context,reason",[(context(market_state=market(feed_as_of=NOW-timedelta(seconds=91))),"STALE_FEED"),(context(session_open=False),"SESSION_CLOSED"),(context(kill_switch=True),"KILL_SWITCH_ACTIVE"),(context(account_state=account(daily_realized_pnl_usd=Decimal("-600.00"))),"DAILY_LOSS_LIMIT_REACHED"),(context(account_state=account(consecutive_failures=3)),"CONSECUTIVE_FAILURE_LIMIT_REACHED"),(context(account_state=account(open_contracts_total=1)),"POSITION_LIMIT_REACHED")])
 def test_directional_plan_fails_closed_on_every_required_safety_gate(risk_context,reason):
     broker=CountingPaperBroker(); result=execute(plan(position_action={"quantity":1,"protective_stop":{"price":"5990.00"},"take_profit":{"price":"6005.00"}}),risk_context=risk_context,broker=broker)
