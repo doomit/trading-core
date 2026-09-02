@@ -9,10 +9,10 @@
     "schema": {"const": "runtime_activity_v1"},
     "receipt_id": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9._:-]+$"},
     "event_id": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9._:-]+$"},
-    "stage": {"enum": ["EVENT_CREATED", "PR_COMMENT_CREATED", "BRAIN_TRIGGERED", "PLAN_WRITTEN", "PLAN_VALIDATED", "EXECUTOR_RECEIVED", "RISK_DECIDED", "PAPER_ORDERED", "PAPER_FILLED_OR_REJECTED", "COMPLETED"]},
+    "stage": {"enum": ["EVENT_CREATED", "PR_COMMENT_CREATED", "BRAIN_TRIGGERED", "PLAN_WRITTEN", "PLAN_VALIDATED", "EXECUTOR_RECEIVED", "RISK_DECIDED", "PAPER_ORDERED", "PAPER_FILLED_OR_REJECTED", "PAPER_EXIT_FILLED", "COMPLETED"]},
     "status": {"enum": ["PASS", "WAITING", "FAIL", "REJECTED", "INFO"]},
     "occurred_at": {"type": "string", "format": "date-time"},
-    "source": {"enum": ["azure_event_producer", "github_feed", "chatgpt_event_task", "github_validation", "azure_executor", "risk_gateway", "paper_broker", "control_plane"]},
+    "source": {"enum": ["azure_event_producer", "github_feed", "chatgpt_event_task", "github_validation", "azure_executor", "risk_gateway", "paper_broker", "paper_lifecycle", "control_plane"]},
     "plan_id": {"type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[A-Za-z0-9._:-]+$"},
     "symbol": {"type": "string", "minLength": 1, "maxLength": 32},
     "latency_ms": {"type": "integer", "minimum": 0},
@@ -25,7 +25,7 @@
     }
   },
   "allOf": [{
-    "if": {"properties": {"stage": {"enum": ["PLAN_WRITTEN", "PLAN_VALIDATED", "EXECUTOR_RECEIVED", "RISK_DECIDED", "PAPER_ORDERED", "PAPER_FILLED_OR_REJECTED", "COMPLETED"]}}},
+    "if": {"properties": {"stage": {"enum": ["PLAN_WRITTEN", "PLAN_VALIDATED", "EXECUTOR_RECEIVED", "RISK_DECIDED", "PAPER_ORDERED", "PAPER_FILLED_OR_REJECTED", "PAPER_EXIT_FILLED", "COMPLETED"]}}},
     "then": {"required": ["plan_id"]}
   }]
 }
