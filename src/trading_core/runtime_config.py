@@ -20,6 +20,8 @@ MAX_OPEN_MICRO_CONTRACTS = 100
 MAX_DAILY_REALIZED_LOSS_USD = Decimal("100000")
 MAX_CONSECUTIVE_LOSSES = 20
 MAX_ENTRIES_PER_SESSION = 200
+MAX_CONFIGURED_FEED_AGE_SECONDS = 900
+DEFAULT_FEED_AGE_SECONDS = 90
 
 
 def _object(value: Any, field: str) -> dict[str, Any]:
@@ -102,6 +104,15 @@ class RiskConfig:
     max_daily_realized_loss_usd: Decimal
     max_consecutive_losses: int
     max_entries_per_session: int
+    configured_max_feed_age_seconds: int | None = None
+
+    @property
+    def max_feed_age_seconds(self) -> int:
+        return (
+            self.configured_max_feed_age_seconds
+            if self.configured_max_feed_age_seconds is not None
+            else DEFAULT_FEED_AGE_SECONDS
+        )
 
 
 @dataclass(frozen=True)
@@ -178,7 +189,23 @@ class TradingRuntimeConfig:
             raise ValueError("risk.max_daily_realized_loss_usd exceeds compiled PAPER envelope")
         max_losses = _count(risk_doc.get("max_consecutive_losses"), "risk.max_consecutive_losses", maximum=MAX_CONSECUTIVE_LOSSES)
         max_entries = _count(risk_doc.get("max_entries_per_session"), "risk.max_entries_per_session", maximum=MAX_ENTRIES_PER_SESSION)
-        risk = RiskConfig(target_risk, max_risk, max_open, daily_loss, max_losses, max_entries)
+        raw_feed_age = risk_doc.get("max_feed_age_seconds")
+        max_feed_age = None
+        if raw_feed_age is not None:
+            max_feed_age = _count(
+                raw_feed_age,
+                "risk.max_feed_age_seconds",
+                maximum=MAX_CONFIGURED_FEED_AGE_SECONDS,
+            )
+        risk = RiskConfig(
+            target_risk,
+            max_risk,
+            max_open,
+            daily_loss,
+            max_losses,
+            max_entries,
+            max_feed_age,
+        )
 
         return cls(
             schema=_SCHEMA,
@@ -192,6 +219,16 @@ class TradingRuntimeConfig:
         )
 
     def to_document(self) -> dict[str, Any]:
+        risk_document = {
+            "target_risk_per_trade_usd": _json_number(self.risk.target_risk_per_trade_usd),
+            "max_risk_per_trade_usd": _json_number(self.risk.max_risk_per_trade_usd),
+            "max_open_micro_contracts": self.risk.max_open_micro_contracts,
+            "max_daily_realized_loss_usd": _json_number(self.risk.max_daily_realized_loss_usd),
+            "max_consecutive_losses": self.risk.max_consecutive_losses,
+            "max_entries_per_session": self.risk.max_entries_per_session,
+        }
+        if self.risk.configured_max_feed_age_seconds is not None:
+            risk_document["max_feed_age_seconds"] = self.risk.configured_max_feed_age_seconds
         return {
             "schema": self.schema,
             "config_version": self.config_version,
@@ -210,14 +247,7 @@ class TradingRuntimeConfig:
                 "min_action_confidence": _json_number(self.strategy.min_action_confidence),
                 "setup_families": list(self.strategy.setup_families),
             },
-            "risk": {
-                "target_risk_per_trade_usd": _json_number(self.risk.target_risk_per_trade_usd),
-                "max_risk_per_trade_usd": _json_number(self.risk.max_risk_per_trade_usd),
-                "max_open_micro_contracts": self.risk.max_open_micro_contracts,
-                "max_daily_realized_loss_usd": _json_number(self.risk.max_daily_realized_loss_usd),
-                "max_consecutive_losses": self.risk.max_consecutive_losses,
-                "max_entries_per_session": self.risk.max_entries_per_session,
-            },
+            "risk": risk_document,
         }
 
 
