@@ -106,12 +106,13 @@ class RiskContext:
     kill_switch: bool
     account: AccountState
     market: MarketSnapshot
+    paused: bool = False
 
     def __post_init__(self) -> None:
         _aware(self.now, "now")
         if not isinstance(self.session_id, str) or not self.session_id:
             raise ValueError("session_id must be a non-empty string")
-        if not isinstance(self.session_open, bool) or not isinstance(self.kill_switch, bool):
+        if not isinstance(self.session_open, bool) or not isinstance(self.kill_switch, bool) or not isinstance(self.paused, bool):
             raise ValueError("session flags must be booleans")
 
 
@@ -254,6 +255,8 @@ class RiskGateway:
             return RiskDecision(False, "SESSION_CLOSED")
         if context.kill_switch:
             return RiskDecision(False, "KILL_SWITCH_ACTIVE")
+        if context.paused:
+            return RiskDecision(False, "PAUSE_ACTIVE")
         if symbol not in _INSTRUMENTS or market.symbol != symbol:
             return RiskDecision(False, "UNSUPPORTED_OR_MISMATCHED_SYMBOL")
         if market.environment != "PROD" or market.data_class != "REAL" or market.source != "tradingview" or not market.healthy:
