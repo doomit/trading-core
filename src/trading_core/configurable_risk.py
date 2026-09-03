@@ -51,6 +51,8 @@ class ConfigurableRiskGateway:
             return self._reject("SESSION_CLOSED")
         if context.kill_switch:
             return self._reject("KILL_SWITCH_ACTIVE")
+        if context.paused:
+            return self._reject("PAUSE_ACTIVE")
         if symbol not in _INSTRUMENTS or market.symbol != symbol:
             return self._reject("UNSUPPORTED_OR_MISMATCHED_SYMBOL")
         if market.environment != "PROD" or market.data_class != "REAL" or market.source != "tradingview" or not market.healthy:
