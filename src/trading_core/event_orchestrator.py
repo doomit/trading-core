@@ -212,12 +212,15 @@ def validate_trading_plan(
     expected_event_id: str,
     now: datetime,
     expected_symbol: str | None = None,
+    expected_state_version: int | str | None = None,
 ) -> None:
     expected_id = expected_plan_id(expected_event_id)
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("now must be timezone-aware")
     if expected_symbol is not None and (not isinstance(expected_symbol, str) or not expected_symbol):
         raise ValueError("expected_symbol must be a non-empty string when provided")
+    if isinstance(expected_state_version, bool) or not isinstance(expected_state_version, (int, str, type(None))):
+        raise ValueError("expected_state_version must be an integer, string, or null")
 
     _validate_current_schema(plan)
     if plan["trigger_event_id"] != expected_event_id:
@@ -226,6 +229,11 @@ def validate_trading_plan(
         raise PlanValidationError("PLAN_ID_MISMATCH", "plan_id does not match the deterministic event plan identity")
     if expected_symbol is not None and plan["symbol"] != expected_symbol:
         raise PlanValidationError("SYMBOL_MISMATCH", "plan symbol does not match the durable event symbol")
+    if expected_state_version is not None and plan.get("based_on_state_version") != expected_state_version:
+        raise PlanValidationError(
+            "STATE_VERSION_MISMATCH",
+            "plan based_on_state_version does not match the durable event state version",
+        )
 
     created_at = _parse_aware_timestamp(plan["created_at"], "created_at")
     valid_until = _parse_aware_timestamp(plan["valid_until"], "valid_until")
@@ -243,6 +251,7 @@ def classify_plan_pickup(
     expected_event_id: str,
     now: datetime,
     expected_symbol: str | None = None,
+    expected_state_version: int | str | None = None,
 ) -> PickupDecision:
     expected_plan_id(expected_event_id)
     if plan is None:
@@ -253,6 +262,7 @@ def classify_plan_pickup(
             expected_event_id=expected_event_id,
             now=now,
             expected_symbol=expected_symbol,
+            expected_state_version=expected_state_version,
         )
     except PlanValidationError as exc:
         return PickupDecision(PickupStatus.REJECTED, exc.reason_code, None)
