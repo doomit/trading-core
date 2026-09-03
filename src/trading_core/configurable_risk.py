@@ -51,6 +51,8 @@ class ConfigurableRiskGateway:
             return self._reject("SESSION_CLOSED")
         if context.kill_switch:
             return self._reject("KILL_SWITCH_ACTIVE")
+        if context.paused:
+            return self._reject("PAUSE_ACTIVE")
         if symbol not in _INSTRUMENTS or market.symbol != symbol:
             return self._reject("UNSUPPORTED_OR_MISMATCHED_SYMBOL")
         if market.environment != "PROD" or market.data_class != "REAL" or market.source != "tradingview" or not market.healthy:
@@ -67,6 +69,9 @@ class ConfigurableRiskGateway:
             return self._reject("DAILY_LOSS_LIMIT_REACHED")
         if account.consecutive_failures >= cfg.risk.max_consecutive_losses:
             return self._reject("CONSECUTIVE_FAILURE_LIMIT_REACHED")
+        effective_exposure = account.open_contracts_total + account.reserved_contracts_total
+        if account.reserved_contracts_total > 0 and effective_exposure >= cfg.risk.max_open_micro_contracts:
+            return self._reject("OPEN_ORDER_CONFLICT")
         if account.open_contracts_total >= cfg.risk.max_open_micro_contracts:
             return self._reject("POSITION_LIMIT_REACHED")
         if account.entries_this_session >= cfg.risk.max_entries_per_session:
@@ -152,7 +157,7 @@ class ConfigurableRiskGateway:
         if per_contract_risk > risk_budget:
             return self._reject("PLAN_RISK_BUDGET_EXCEEDED")
 
-        remaining_capacity = cfg.risk.max_open_micro_contracts - account.open_contracts_total
+        remaining_capacity = cfg.risk.max_open_micro_contracts - effective_exposure
         max_by_hard_risk = int(cfg.risk.max_risk_per_trade_usd // per_contract_risk)
         max_by_plan_risk = int(risk_budget // per_contract_risk)
         quantity = min(requested_quantity, remaining_capacity, max_by_hard_risk, max_by_plan_risk)

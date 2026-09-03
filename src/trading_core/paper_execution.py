@@ -66,11 +66,12 @@ class AccountState:
     consecutive_failures: int
     open_contracts_total: int
     entries_this_session: int = 0
+    reserved_contracts_total: int = 0
 
     def __post_init__(self) -> None:
         for field in ("starting_equity_usd", "equity_usd", "daily_realized_pnl_usd"):
             object.__setattr__(self, field, _decimal(getattr(self, field), field))
-        for field in ("consecutive_failures", "open_contracts_total", "entries_this_session"):
+        for field in ("consecutive_failures", "open_contracts_total", "entries_this_session", "reserved_contracts_total"):
             value = getattr(self, field)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f"{field} must be a nonnegative integer")
@@ -106,12 +107,13 @@ class RiskContext:
     kill_switch: bool
     account: AccountState
     market: MarketSnapshot
+    paused: bool = False
 
     def __post_init__(self) -> None:
         _aware(self.now, "now")
         if not isinstance(self.session_id, str) or not self.session_id:
             raise ValueError("session_id must be a non-empty string")
-        if not isinstance(self.session_open, bool) or not isinstance(self.kill_switch, bool):
+        if not isinstance(self.session_open, bool) or not isinstance(self.kill_switch, bool) or not isinstance(self.paused, bool):
             raise ValueError("session flags must be booleans")
 
 
@@ -254,6 +256,8 @@ class RiskGateway:
             return RiskDecision(False, "SESSION_CLOSED")
         if context.kill_switch:
             return RiskDecision(False, "KILL_SWITCH_ACTIVE")
+        if context.paused:
+            return RiskDecision(False, "PAUSE_ACTIVE")
         if symbol not in _INSTRUMENTS or market.symbol != symbol:
             return RiskDecision(False, "UNSUPPORTED_OR_MISMATCHED_SYMBOL")
         if market.environment != "PROD" or market.data_class != "REAL" or market.source != "tradingview" or not market.healthy:
@@ -269,6 +273,8 @@ class RiskGateway:
             return RiskDecision(False, "DAILY_LOSS_LIMIT_REACHED")
         if account.consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
             return RiskDecision(False, "CONSECUTIVE_FAILURE_LIMIT_REACHED")
+        if account.reserved_contracts_total > 0 and account.open_contracts_total + account.reserved_contracts_total >= MAX_OPEN_MICRO_CONTRACTS:
+            return RiskDecision(False, "OPEN_ORDER_CONFLICT")
         if account.open_contracts_total >= MAX_OPEN_MICRO_CONTRACTS:
             return RiskDecision(False, "POSITION_LIMIT_REACHED")
         if account.entries_this_session >= MAX_ENTRIES_PER_SESSION:
