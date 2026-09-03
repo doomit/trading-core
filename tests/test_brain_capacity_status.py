@@ -31,6 +31,27 @@ def trigger():
     }
 
 
+def capacity():
+    return {
+        "mode": "PAPER",
+        "config_version": "cfg_pa_aggressive_a2_1m_20260901_001",
+        "open_contracts_total": 0,
+        "max_open_micro_contracts": 20,
+        "remaining_open_micro_contracts": 20,
+        "entries_this_session": 0,
+        "max_entries_per_session": 30,
+        "remaining_entries_this_session": 30,
+        "daily_realized_pnl_usd": 0,
+        "max_daily_realized_loss_usd": 5000,
+        "remaining_daily_loss_usd": 5000,
+        "consecutive_failures": 0,
+        "max_consecutive_losses": 4,
+        "remaining_loss_streak": 4,
+        "target_risk_per_trade_usd": 500,
+        "max_risk_per_trade_usd": 1000,
+    }
+
+
 def test_brain_trigger_can_expose_capacity_enrichment_unavailable_state():
     value = trigger()
     value["account_capacity_status"] = {
@@ -50,5 +71,23 @@ def test_available_capacity_status_requires_account_capacity_payload():
 def test_unknown_capacity_status_is_rejected():
     value = trigger()
     value["account_capacity_status"] = {"state": "MAYBE", "reason": None}
+    with pytest.raises(ValidationError):
+        validate(value, schema())
+
+
+def test_unavailable_capacity_status_requires_failure_reason():
+    value = trigger()
+    value["account_capacity_status"] = {"state": "UNAVAILABLE", "reason": None}
+    with pytest.raises(ValidationError):
+        validate(value, schema())
+
+
+def test_available_capacity_status_cannot_claim_enrichment_failure():
+    value = trigger()
+    value["account_capacity"] = capacity()
+    value["account_capacity_status"] = {
+        "state": "AVAILABLE",
+        "reason": "capacity_enrichment_failed",
+    }
     with pytest.raises(ValidationError):
         validate(value, schema())
