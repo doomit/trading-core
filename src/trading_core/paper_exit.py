@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 from .paper_execution import (
+    ROUND_TURN_COMMISSION_USD,
     ExecutionResult,
     PaperFill,
     PaperOrder,
@@ -97,12 +99,22 @@ def close_open_position(
         lifecycle_position.stop_price,
         occurred_at,
     )
+    reference_price = (
+        lifecycle_position.target_price
+        if resolution.reason_code == "TARGET_FILLED"
+        else lifecycle_position.stop_price
+    )
+    slippage_points = resolution.exit_price - reference_price
+    commission_usd = ROUND_TURN_COMMISSION_USD * resolution.exit_quantity / Decimal("2")
     exit_fill = PaperFill(
         exit_fill_id,
         exit_order_id,
         resolution.exit_price,
         resolution.exit_quantity,
         occurred_at,
+        reference_price,
+        slippage_points,
+        commission_usd,
     )
     closed_position = PaperPositionRecord(
         position_record.position_id,
@@ -130,6 +142,8 @@ def close_open_position(
         resolution.exit_price,
         occurred_at,
         "EXIT",
+        exit_fill.slippage_points,
+        exit_fill.commission_usd,
     )
     exit_receipt = _receipt(
         event_id=event_id,
