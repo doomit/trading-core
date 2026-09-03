@@ -143,6 +143,7 @@ class PaperOrder:
     order_type: str = "MARKET"
     status: str = "FILLED"
     limit_price: Decimal | None = None
+    stop_price: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -387,6 +388,36 @@ class DeterministicPaperBroker:
             "LIMIT",
             "PENDING",
             limit,
+        )
+        return order, None
+
+    def submit_stop(
+        self,
+        intent: OrderIntent,
+        market_state: MarketSnapshot,
+        *,
+        stop_price: Decimal,
+    ) -> tuple[PaperOrder, PaperFill | None]:
+        if intent.symbol != market_state.symbol:
+            raise ValueError("order intent and market symbol do not match")
+        if market_state.next_bar_start < intent.not_before:
+            raise ValueError("paper order precedes the allowed next bar")
+        stop = _decimal(stop_price, "stop_price")
+        if stop <= 0:
+            raise ValueError("stop_price must be positive")
+        identity = hashlib.sha256(
+            f"{intent.event_id}|{intent.plan_id}|{intent.plan_hash}|STOP|{stop}".encode()
+        ).hexdigest()
+        order = PaperOrder(
+            order_id=f"paper-order:{identity[:32]}",
+            symbol=intent.symbol,
+            side=intent.side,
+            quantity=intent.quantity,
+            protective_stop_price=intent.protective_stop_price,
+            submitted_at=market_state.next_bar_start,
+            order_type="STOP",
+            status="PENDING",
+            stop_price=stop,
         )
         return order, None
 
