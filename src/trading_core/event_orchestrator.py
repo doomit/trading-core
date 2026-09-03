@@ -57,6 +57,7 @@ class EventRecord:
     symbol: str
     created_at: datetime
     deadline: datetime
+    state_version: int | str | None = None
 
     def __post_init__(self) -> None:
         expected = expected_plan_id(self.event_id)
@@ -64,6 +65,8 @@ class EventRecord:
             raise ValueError("plan_id must match deterministic event identity")
         if not isinstance(self.symbol, str) or not self.symbol:
             raise ValueError("symbol must be a non-empty string")
+        if isinstance(self.state_version, bool) or not isinstance(self.state_version, (int, str, type(None))):
+            raise ValueError("state_version must be an integer, string, or null")
         if self.created_at.tzinfo is None or self.created_at.utcoffset() is None:
             raise ValueError("created_at must be timezone-aware")
         if self.deadline.tzinfo is None or self.deadline.utcoffset() is None:
@@ -107,6 +110,7 @@ def start_or_resume_event(
     symbol: str,
     created_at: datetime,
     deadline: datetime,
+    state_version: int | str | None = None,
 ) -> tuple[EventRecord, bool]:
     plan_id = expected_plan_id(event_id)
     candidate = EventRecord(
@@ -115,10 +119,15 @@ def start_or_resume_event(
         symbol=symbol,
         created_at=created_at,
         deadline=deadline,
+        state_version=state_version,
     )
     existing = repo.get_event(event_id)
     if existing is not None:
-        if existing.plan_id != candidate.plan_id or existing.symbol != candidate.symbol:
+        if (
+            existing.plan_id != candidate.plan_id
+            or existing.symbol != candidate.symbol
+            or existing.state_version != candidate.state_version
+        ):
             raise EventIdentityConflict("event_id is already bound to different immutable identity data")
         return existing, False
 
@@ -128,7 +137,11 @@ def start_or_resume_event(
     existing = repo.get_event(event_id)
     if existing is None:
         raise RuntimeError("event create lost race without a readable durable record")
-    if existing.plan_id != candidate.plan_id or existing.symbol != candidate.symbol:
+    if (
+        existing.plan_id != candidate.plan_id
+        or existing.symbol != candidate.symbol
+        or existing.state_version != candidate.state_version
+    ):
         raise EventIdentityConflict("event_id race resolved to different immutable identity data")
     return existing, False
 
