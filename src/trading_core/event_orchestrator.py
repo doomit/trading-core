@@ -22,6 +22,7 @@ _REQUIRED_FIELDS = {
     "confidence",
     "analysis_summary",
 }
+_STATE_VERSION_UNSET = object()
 
 
 class PickupStatus(str, Enum):
@@ -225,15 +226,16 @@ def validate_trading_plan(
     expected_event_id: str,
     now: datetime,
     expected_symbol: str | None = None,
-    expected_state_version: int | str | None = None,
+    expected_state_version: Any = _STATE_VERSION_UNSET,
 ) -> None:
     expected_id = expected_plan_id(expected_event_id)
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("now must be timezone-aware")
     if expected_symbol is not None and (not isinstance(expected_symbol, str) or not expected_symbol):
         raise ValueError("expected_symbol must be a non-empty string when provided")
-    if isinstance(expected_state_version, bool) or not isinstance(expected_state_version, (int, str, type(None))):
-        raise ValueError("expected_state_version must be an integer, string, or null")
+    if expected_state_version is not _STATE_VERSION_UNSET:
+        if isinstance(expected_state_version, bool) or not isinstance(expected_state_version, (int, str, type(None))):
+            raise ValueError("expected_state_version must be an integer, string, or null")
 
     _validate_current_schema(plan)
     if plan["trigger_event_id"] != expected_event_id:
@@ -242,7 +244,7 @@ def validate_trading_plan(
         raise PlanValidationError("PLAN_ID_MISMATCH", "plan_id does not match the deterministic event plan identity")
     if expected_symbol is not None and plan["symbol"] != expected_symbol:
         raise PlanValidationError("SYMBOL_MISMATCH", "plan symbol does not match the durable event symbol")
-    if expected_state_version is not None and plan.get("based_on_state_version") != expected_state_version:
+    if expected_state_version is not _STATE_VERSION_UNSET and plan.get("based_on_state_version") != expected_state_version:
         raise PlanValidationError(
             "STATE_VERSION_MISMATCH",
             "plan based_on_state_version does not match the durable event state version",
@@ -264,7 +266,7 @@ def classify_plan_pickup(
     expected_event_id: str,
     now: datetime,
     expected_symbol: str | None = None,
-    expected_state_version: int | str | None = None,
+    expected_state_version: Any = _STATE_VERSION_UNSET,
 ) -> PickupDecision:
     expected_plan_id(expected_event_id)
     if plan is None:
