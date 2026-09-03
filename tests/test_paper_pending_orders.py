@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from trading_core.paper_execution import DeterministicPaperBroker, MarketSnapshot, OrderIntent
+from trading_core.paper_lifecycle import Bar
 
 
 NOW = datetime(2026, 9, 3, 14, 30, tzinfo=timezone.utc)
@@ -139,8 +140,12 @@ def test_pending_buy_stop_fills_at_stop_when_closed_bar_trades_through():
     filled, fill = broker.process_pending_stop(
         pending,
         intent,
-        bar_low=Decimal("5999.75"),
-        bar_high=Decimal("6000.50"),
+        bar=Bar(
+            open=Decimal("6000.00"),
+            high=Decimal("6000.50"),
+            low=Decimal("5999.75"),
+            close=Decimal("6000.25"),
+        ),
         occurred_at=NOW,
     )
 
