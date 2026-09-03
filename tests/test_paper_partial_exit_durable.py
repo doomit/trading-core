@@ -23,6 +23,7 @@ def _plan():
         "analysis_summary": ["durable partial-exit adapter regression"],
         "position_action": {
             "quantity": 3,
+            "target_exit_quantity": 1,
             "protective_stop": {"price": "5995.00"},
             "take_profit": {"price": "6005.00"},
         },
@@ -43,8 +44,6 @@ def _three_lot_open_entry(plan):
         entry_price=Decimal("6000.00"),
         opened_at=NOW,
         status="OPEN",
-        target_exit_quantity=1,
-        target_consumed=False,
     )
     return ExecutionResult(
         event_id=EVENT_ID,
@@ -77,8 +76,6 @@ def test_partial_target_persists_remaining_position_and_final_stop_correlates_al
     assert partial.position.position_id == entry.position.position_id
     assert partial.position.quantity == 2
     assert partial.position.status == "OPEN"
-    assert partial.position.target_exit_quantity == 1
-    assert partial.position.target_consumed is True
     assert partial.fill is not None and partial.fill.quantity == 1
     assert partial.fill.reference_price == Decimal("6005.00")
     assert partial.fill.slippage_points == Decimal("0.00")
