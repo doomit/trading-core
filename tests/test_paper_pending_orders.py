@@ -79,3 +79,33 @@ def test_pending_buy_limit_fills_at_limit_when_closed_bar_trades_through():
     assert fill.price == Decimal("5999.75")
     assert fill.quantity == 1
     assert fill.occurred_at == NOW
+
+
+def test_replayed_crossing_bar_does_not_emit_a_second_pending_limit_fill():
+    broker = DeterministicPaperBroker()
+    intent = _intent()
+    pending, entry_fill = broker.submit_limit(
+        intent,
+        _market("6000.00"),
+        limit_price=Decimal("5999.75"),
+    )
+    assert entry_fill is None
+
+    filled, first_fill = broker.process_pending_limit(
+        pending,
+        intent,
+        bar_low=Decimal("5999.50"),
+        bar_high=Decimal("6000.25"),
+        occurred_at=NOW,
+    )
+    replayed, duplicate_fill = broker.process_pending_limit(
+        pending,
+        intent,
+        bar_low=Decimal("5999.50"),
+        bar_high=Decimal("6000.25"),
+        occurred_at=NOW,
+    )
+
+    assert first_fill is not None
+    assert replayed == filled
+    assert duplicate_fill is None
