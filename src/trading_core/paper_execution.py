@@ -333,6 +333,11 @@ class RiskGateway:
 
 class DeterministicPaperBroker:
     """Credential-free paper adapter with conservative, reproducible fills."""
+
+    def __init__(self) -> None:
+        self._pending_lock = threading.Lock()
+        self._filled_pending_limits: dict[str, PaperOrder] = {}
+
     def submit(self, intent: OrderIntent, market_state: MarketSnapshot) -> tuple[PaperOrder, PaperFill]:
         if intent.symbol != market_state.symbol:
             raise ValueError("order intent and market symbol do not match")
@@ -405,32 +410,37 @@ class DeterministicPaperBroker:
         high = _decimal(bar_high, "bar_high")
         if low > high:
             raise ValueError("bar_low must not exceed bar_high")
-        if low > order.limit_price:
-            return order, None
-        filled = PaperOrder(
-            order.order_id,
-            order.symbol,
-            order.side,
-            order.quantity,
-            order.protective_stop_price,
-            order.submitted_at,
-            order.order_type,
-            "FILLED",
-            order.limit_price,
-        )
-        identity = hashlib.sha256(f"{order.order_id}|{occurred_at.isoformat()}|LIMIT".encode()).hexdigest()
-        commission_usd = ROUND_TURN_COMMISSION_USD * order.quantity / Decimal("2")
-        fill = PaperFill(
-            f"paper-fill:{identity[:32]}",
-            order.order_id,
-            order.limit_price,
-            order.quantity,
-            occurred_at,
-            order.limit_price,
-            Decimal("0"),
-            commission_usd,
-        )
-        return filled, fill
+        with self._pending_lock:
+            existing = self._filled_pending_limits.get(order.order_id)
+            if existing is not None:
+                return existing, None
+            if low > order.limit_price:
+                return order, None
+            filled = PaperOrder(
+                order.order_id,
+                order.symbol,
+                order.side,
+                order.quantity,
+                order.protective_stop_price,
+                order.submitted_at,
+                order.order_type,
+                "FILLED",
+                order.limit_price,
+            )
+            identity = hashlib.sha256(f"{order.order_id}|{occurred_at.isoformat()}|LIMIT".encode()).hexdigest()
+            commission_usd = ROUND_TURN_COMMISSION_USD * order.quantity / Decimal("2")
+            fill = PaperFill(
+                f"paper-fill:{identity[:32]}",
+                order.order_id,
+                order.limit_price,
+                order.quantity,
+                occurred_at,
+                order.limit_price,
+                Decimal("0"),
+                commission_usd,
+            )
+            self._filled_pending_limits[order.order_id] = filled
+            return filled, fill
 
 
 def _receipt(*, event_id: str, plan_id: str, stage: str, status: str, source: str, occurred_at: datetime, reason_code: str, decision: str | None = None) -> dict[str, Any]:
