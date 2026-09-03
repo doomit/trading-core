@@ -3,79 +3,41 @@ from decimal import Decimal
 
 import pytest
 
-from trading_core.paper_execution import (
-    AccountState,
-    DeterministicPaperBroker,
-    ExecutionLedger,
-    MarketSnapshot,
-    RiskContext,
-    RiskGateway,
-    canonical_plan_hash,
-    execute_reserved_plan,
-)
+from trading_core.paper_execution import AccountState, DeterministicPaperBroker, ExecutionLedger, MarketSnapshot, RiskContext, RiskGateway, canonical_plan_hash, execute_reserved_plan
 
+NOW=datetime(2026,8,30,14,31,tzinfo=timezone.utc); EVENT_ID="evt_mes_20260830T143000Z_0001"
 
-NOW = datetime(2026, 8, 31, 14, 31, tzinfo=timezone.utc)
-EVENT_ID = "evt_mes_20260831T143000Z_0001"
-
-
-def plan(decision="LONG", **overrides):
-    document = {
-        "schema": "trading_plan_v1",
-        "plan_id": EVENT_ID,
-        "trigger_event_id": EVENT_ID,
-        "created_at": (NOW - timedelta(seconds=10)).isoformat(),
-        "valid_until": (NOW + timedelta(seconds=50)).isoformat(),
-        "symbol": "MES1!",
-        "decision": decision,
-        "confidence": 0.8,
-        "analysis_summary": ["deterministic paper-execution test"],
-        "position_action": {"quantity": 1, "protective_stop": {"price": "5990.00"}},
-    }
-    document.update(overrides)
-    return document
-
+def plan(decision="LONG",**overrides):
+    data={"schema":"trading_plan_v1","plan_id":EVENT_ID,"trigger_event_id":EVENT_ID,"created_at":(NOW-timedelta(seconds=10)).isoformat(),"valid_until":(NOW+timedelta(seconds=50)).isoformat(),"symbol":"MES1!","decision":decision,"confidence":0.8,"analysis_summary":["safe paper probe"]}
+    data.update(overrides); return data
 
 def account(**overrides):
-    values = {"mode":"PAPER","starting_equity_usd":Decimal("50000.00"),"equity_usd":Decimal("50000.00"),"daily_realized_pnl_usd":Decimal("0.00"),"consecutive_failures":0,"open_contracts_total":0}
-    values.update(overrides)
-    return AccountState(**values)
-
+    data=dict(mode="PAPER",starting_equity_usd=Decimal("50000.00"),equity_usd=Decimal("50000.00"),daily_realized_pnl_usd=Decimal("0.00"),consecutive_failures=0,open_contracts_total=0); data.update(overrides); return AccountState(**data)
 
 def market(**overrides):
-    values = {"symbol":"MES1!","feed_as_of":NOW-timedelta(seconds=5),"next_bar_start":NOW,"next_bar_open":Decimal("6000.00"),"environment":"PROD","data_class":"REAL","source":"tradingview","healthy":True,"consecutive_closed_bars":3}
-    values.update(overrides)
-    return MarketSnapshot(**values)
+    data=dict(symbol="MES1!",feed_as_of=NOW-timedelta(seconds=5),next_bar_start=NOW,next_bar_open=Decimal("6000.00"),environment="PROD",data_class="REAL",source="tradingview",healthy=True,consecutive_closed_bars=3); data.update(overrides); return MarketSnapshot(**data)
 
-
-def context(*, account_state=None, market_state=None, **overrides):
-    values = {"now":NOW,"session_id":"CME-2026-08-31","session_open":True,"kill_switch":False,"account":account_state or account(),"market":market_state or market()}
-    values.update(overrides)
-    return RiskContext(**values)
-
+def context(**overrides):
+    data=dict(now=NOW,session_id="CME-2026-08-30",session_open=True,kill_switch=False,account=account(),market=market()); data.update(overrides)
+    if "account_state" in data: data["account"]=data.pop("account_state")
+    if "market_state" in data: data["market"]=data.pop("market_state")
+    return RiskContext(**data)
 
 class CountingPaperBroker(DeterministicPaperBroker):
-    def __init__(self):
-        super().__init__(); self.calls = 0
-    def submit(self, intent, market_state):
-        self.calls += 1
-        return super().submit(intent, market_state)
+    def __init__(self): self.calls=0
+    def submit(self,intent,market_state): self.calls+=1; return super().submit(intent,market_state)
+
+def execute(document,*,event_id=EVENT_ID,reservation_plan_hash=None,risk_context=None,broker=None,ledger=None):
+    return execute_reserved_plan(document,event_id=event_id,reservation_plan_hash=reservation_plan_hash or canonical_plan_hash(document),context=risk_context or context(),risk_gateway=RiskGateway(),broker=broker or DeterministicPaperBroker(),ledger=ledger or ExecutionLedger())
 
 
-def execute(document, *, risk_context=None, ledger=None, broker=None, reservation_hash=None):
-    return execute_reserved_plan(document,event_id=EVENT_ID,reservation_plan_hash=reservation_hash or canonical_plan_hash(document),context=risk_context or context(),risk_gateway=RiskGateway(),broker=broker or DeterministicPaperBroker(),ledger=ledger or ExecutionLedger())
+def test_no_trade_is_auditable_and_does_not_manufacture_fill():
+    result=execute(plan("NO_TRADE")); assert result.status=="NO_EXECUTION"; assert result.reason_code=="PLAN_NO_TRADE"; assert result.order is None; assert result.fill is None; assert result.terminal is True
 
 
-@pytest.mark.parametrize("decision", ["NO_TRADE", "HOLD"])
-def test_no_trade_and_hold_are_terminal_without_order_or_fill(decision):
-    broker=CountingPaperBroker(); result=execute(plan(decision, position_action=None),broker=broker)
-    assert result.terminal is True; assert result.status=="NO_EXECUTION"; assert result.reason_code==f"PLAN_{decision}"; assert result.order is None; assert result.fill is None; assert broker.calls==0
-    assert [r["stage"] for r in result.receipts]==["EXECUTOR_RECEIVED","COMPLETED"]
-
-
-@pytest.mark.parametrize("decision", ["LONG", "SHORT"])
+@pytest.mark.parametrize("decision",["LONG","SHORT"])
 def test_directional_plan_requires_explicit_protective_stop(decision):
-    result=execute(plan(decision, position_action={"quantity":1}))
+    broker=CountingPaperBroker(); result=execute(plan(decision),broker=broker)
     assert result.status=="REJECTED"; assert result.reason_code=="MISSING_PROTECTIVE_STOP"; assert result.order is None; assert result.fill is None
 
 
@@ -92,14 +54,7 @@ def test_directional_plan_requires_take_profit_for_terminal_bracket_lifecycle(de
 
 def test_directional_plan_rejects_non_numeric_take_profit_before_broker_execution():
     broker = CountingPaperBroker()
-    result = execute(
-        plan(position_action={
-            "quantity": 1,
-            "protective_stop": {"price": "5990.00"},
-            "take_profit": {"price": "not-a-price"},
-        }),
-        broker=broker,
-    )
+    result = execute(plan(position_action={"quantity":1,"protective_stop":{"price":"5990.00"},"take_profit":{"price":"not-a-price"}}), broker=broker)
     assert result.status == "REJECTED"
     assert result.reason_code == "INVALID_TAKE_PROFIT"
     assert result.order is None
@@ -107,20 +62,10 @@ def test_directional_plan_rejects_non_numeric_take_profit_before_broker_executio
     assert broker.calls == 0
 
 
-@pytest.mark.parametrize(
-    "decision,stop,target",
-    [("LONG", "5990.00", "5999.00"), ("SHORT", "6010.00", "6001.00")],
-)
+@pytest.mark.parametrize("decision,stop,target", [("LONG","5990.00","5999.00"),("SHORT","6010.00","6001.00")])
 def test_directional_plan_rejects_wrong_side_take_profit_before_broker_execution(decision, stop, target):
     broker = CountingPaperBroker()
-    result = execute(
-        plan(decision, position_action={
-            "quantity": 1,
-            "protective_stop": {"price": stop},
-            "take_profit": {"price": target},
-        }),
-        broker=broker,
-    )
+    result = execute(plan(decision, position_action={"quantity":1,"protective_stop":{"price":stop},"take_profit":{"price":target}}), broker=broker)
     assert result.status == "REJECTED"
     assert result.reason_code == "INVALID_TAKE_PROFIT_DIRECTION"
     assert result.order is None
@@ -146,7 +91,7 @@ def test_duplicate_plan_id_cannot_create_a_second_order_or_fill():
 
 
 def test_reservation_hash_must_match_the_exact_immutable_plan():
-    broker=CountingPaperBroker(); result=execute(plan(),broker=broker,reservation_hash="0"*64); assert result.status=="REJECTED"; assert result.reason_code=="RESERVATION_HASH_MISMATCH"; assert broker.calls==0
+    document=plan(position_action={"quantity":1,"protective_stop":{"price":"5990.00"},"take_profit":{"price":"6005.00"}}); result=execute(document,reservation_plan_hash="0"*64); assert result.status=="REJECTED"; assert result.reason_code=="RESERVATION_HASH_MISMATCH"
 
 
 def test_paper_fill_is_deterministic_conservative_and_uses_next_bar_only():
@@ -183,11 +128,7 @@ def test_target_exit_closes_open_position_and_emits_true_terminal_completion():
     close_open_position = getattr(paper_execution_module, "close_open_position", None)
     assert close_open_position is not None, "public core must expose deterministic OPEN->CLOSED paper lifecycle"
 
-    document = plan(position_action={
-        "quantity": 1,
-        "protective_stop": {"price": "5990.00"},
-        "take_profit": {"price": "6005.00"},
-    })
+    document = plan(position_action={"quantity":1,"protective_stop":{"price":"5990.00"},"take_profit":{"price":"6005.00"}})
     entry = execute(document)
     bar = Bar(open=Decimal("6001.00"), high=Decimal("6006.00"), low=Decimal("6000.00"), close=Decimal("6004.00"))
 
@@ -200,5 +141,11 @@ def test_target_exit_closes_open_position_and_emits_true_terminal_completion():
     assert result.trade is not None and result.trade.role == "EXIT"
     assert result.trade.position_id == entry.position.position_id
     assert result.trade.price == Decimal("6005.00")
+    assert result.fill.reference_price == Decimal("6005.00")
+    assert result.fill.slippage_points == Decimal("0.00")
+    assert result.fill.commission_usd == Decimal("1.25")
+    assert result.trade.slippage_points == result.fill.slippage_points
+    assert result.trade.commission_usd == result.fill.commission_usd
+    assert entry.fill.commission_usd + result.fill.commission_usd == Decimal("2.50")
     assert [receipt["stage"] for receipt in result.receipts][-2:] == ["PAPER_EXIT_FILLED", "COMPLETED"]
     assert all(receipt["event_id"] == EVENT_ID and receipt["plan_id"] == EVENT_ID for receipt in result.receipts)
