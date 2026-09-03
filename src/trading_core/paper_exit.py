@@ -29,10 +29,12 @@ def close_open_position(
 ) -> ExecutionResult:
     """Advance one OPEN paper position through a closed-bar OCO resolution.
 
-    The immutable plan remains the source of the protective stop and target.
-    A bar that touches neither leg returns the unchanged nonterminal entry
-    result. A resolved stop/target emits deterministic EXIT records and the
-    first true terminal COMPLETED receipt for the position lifecycle.
+    The immutable plan remains the source of the protective stop, target, and
+    optional one-shot target exit quantity. A bar that touches neither active
+    leg returns the unchanged nonterminal result. Partial target fills emit a
+    durable EXIT record while carrying the remaining OPEN quantity forward;
+    the prior partial receipt makes that target inactive on later bars. The
+    first full close emits the terminal COMPLETED receipt.
     """
     if not isinstance(plan, dict):
         raise ValueError("plan must be an object")
@@ -70,6 +72,24 @@ def close_open_position(
         raise ValueError("take_profit.price is required for bracket lifecycle")
 
     position_record = entry_result.position
+    target_consumed = any(
+        isinstance(receipt, dict)
+        and receipt.get("stage") == "PAPER_EXIT_FILLED"
+        and receipt.get("reason_code") == "TARGET_PARTIAL_FILLED"
+        for receipt in entry_result.receipts
+    )
+    target_exit_quantity = action.get("target_exit_quantity")
+    if target_exit_quantity is not None and not target_consumed:
+        if (
+            isinstance(target_exit_quantity, bool)
+            or not isinstance(target_exit_quantity, int)
+            or target_exit_quantity < 1
+            or target_exit_quantity > position_record.quantity
+        ):
+            raise ValueError("target_exit_quantity must be between 1 and open position quantity")
+    else:
+        target_exit_quantity = None
+
     lifecycle_position = PaperPosition(
         position_id=position_record.position_id,
         symbol=position_record.symbol,
@@ -78,9 +98,11 @@ def close_open_position(
         entry_price=position_record.entry_price,
         stop_price=_decimal(stop["price"], "protective_stop.price"),
         target_price=_decimal(target["price"], "take_profit.price"),
+        target_exit_quantity=target_exit_quantity,
+        target_consumed=target_consumed,
     )
     resolution = resolve_bracket_bar(lifecycle_position, bar)
-    if resolution.remaining_quantity:
+    if resolution.exit_quantity == 0:
         return entry_result
     if resolution.exit_price is None or resolution.exit_quantity < 1:
         raise ValueError("closed bracket resolution must contain an exit fill")
@@ -101,7 +123,7 @@ def close_open_position(
     )
     reference_price = (
         lifecycle_position.target_price
-        if resolution.reason_code == "TARGET_FILLED"
+        if resolution.reason_code in {"TARGET_FILLED", "TARGET_PARTIAL_FILLED"}
         else lifecycle_position.stop_price
     )
     slippage_points = resolution.exit_price - reference_price
@@ -116,7 +138,7 @@ def close_open_position(
         slippage_points,
         commission_usd,
     )
-    closed_position = PaperPositionRecord(
+    updated_position = PaperPositionRecord(
         position_record.position_id,
         event_id,
         plan_id,
@@ -124,10 +146,10 @@ def close_open_position(
         position_record.entry_fill_id,
         position_record.symbol,
         position_record.side,
-        0,
+        resolution.remaining_quantity,
         position_record.entry_price,
         position_record.opened_at,
-        "CLOSED",
+        "OPEN" if resolution.remaining_quantity else "CLOSED",
     )
     exit_trade = PaperTrade(
         f"paper-exit-trade:{identity[:32]}",
@@ -155,6 +177,21 @@ def close_open_position(
         reason_code=resolution.reason_code,
         decision=plan.get("decision") if isinstance(plan.get("decision"), str) else None,
     )
+    if resolution.remaining_quantity:
+        return ExecutionResult(
+            event_id,
+            plan_id,
+            plan_hash,
+            "OPEN",
+            resolution.reason_code,
+            False,
+            entry_result.receipts + (exit_receipt,),
+            exit_order,
+            exit_fill,
+            updated_position,
+            exit_trade,
+        )
+
     completed = _receipt(
         event_id=event_id,
         plan_id=plan_id,
@@ -175,7 +212,7 @@ def close_open_position(
         entry_result.receipts + (exit_receipt, completed),
         exit_order,
         exit_fill,
-        closed_position,
+        updated_position,
         exit_trade,
     )
 
