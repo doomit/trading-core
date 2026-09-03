@@ -140,6 +140,10 @@ class PaperOrder:
     quantity: int
     protective_stop_price: Decimal
     submitted_at: datetime
+    order_type: str = "MARKET"
+    status: str = "FILLED"
+    limit_price: Decimal | None = None
+    stop_price: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -330,6 +334,11 @@ class RiskGateway:
 
 class DeterministicPaperBroker:
     """Credential-free paper adapter with conservative, reproducible fills."""
+
+    def __init__(self) -> None:
+        self._pending_lock = threading.Lock()
+        self._filled_pending_limits: dict[str, PaperOrder] = {}
+
     def submit(self, intent: OrderIntent, market_state: MarketSnapshot) -> tuple[PaperOrder, PaperFill]:
         if intent.symbol != market_state.symbol:
             raise ValueError("order intent and market symbol do not match")
@@ -351,6 +360,118 @@ class DeterministicPaperBroker:
             commission_usd,
         )
         return order, fill
+
+    def submit_limit(
+        self,
+        intent: OrderIntent,
+        market_state: MarketSnapshot,
+        *,
+        limit_price: Decimal,
+    ) -> tuple[PaperOrder, PaperFill | None]:
+        if intent.symbol != market_state.symbol:
+            raise ValueError("order intent and market symbol do not match")
+        if market_state.next_bar_start < intent.not_before:
+            raise ValueError("paper order precedes the allowed next bar")
+        limit = _decimal(limit_price, "limit_price")
+        if limit <= 0:
+            raise ValueError("limit_price must be positive")
+        identity = hashlib.sha256(
+            f"{intent.event_id}|{intent.plan_id}|{intent.plan_hash}|LIMIT|{limit}".encode()
+        ).hexdigest()
+        order = PaperOrder(
+            f"paper-order:{identity[:32]}",
+            intent.symbol,
+            intent.side,
+            intent.quantity,
+            intent.protective_stop_price,
+            market_state.next_bar_start,
+            "LIMIT",
+            "PENDING",
+            limit,
+        )
+        return order, None
+
+    def submit_stop(
+        self,
+        intent: OrderIntent,
+        market_state: MarketSnapshot,
+        *,
+        stop_price: Decimal,
+    ) -> tuple[PaperOrder, PaperFill | None]:
+        if intent.symbol != market_state.symbol:
+            raise ValueError("order intent and market symbol do not match")
+        if market_state.next_bar_start < intent.not_before:
+            raise ValueError("paper order precedes the allowed next bar")
+        stop = _decimal(stop_price, "stop_price")
+        if stop <= 0:
+            raise ValueError("stop_price must be positive")
+        identity = hashlib.sha256(
+            f"{intent.event_id}|{intent.plan_id}|{intent.plan_hash}|STOP|{stop}".encode()
+        ).hexdigest()
+        order = PaperOrder(
+            order_id=f"paper-order:{identity[:32]}",
+            symbol=intent.symbol,
+            side=intent.side,
+            quantity=intent.quantity,
+            protective_stop_price=intent.protective_stop_price,
+            submitted_at=market_state.next_bar_start,
+            order_type="STOP",
+            status="PENDING",
+            stop_price=stop,
+        )
+        return order, None
+
+    def process_pending_limit(
+        self,
+        order: PaperOrder,
+        intent: OrderIntent,
+        *,
+        bar_low: Decimal,
+        bar_high: Decimal,
+        occurred_at: datetime,
+    ) -> tuple[PaperOrder, PaperFill | None]:
+        if order.order_type != "LIMIT" or order.status != "PENDING" or order.limit_price is None:
+            raise ValueError("order must be a pending LIMIT")
+        if order.symbol != intent.symbol or order.side != intent.side or order.quantity != intent.quantity:
+            raise ValueError("pending order and intent do not match")
+        if order.side != "LONG":
+            raise ValueError("pending LIMIT side is not yet supported")
+        _aware(occurred_at, "occurred_at")
+        low = _decimal(bar_low, "bar_low")
+        high = _decimal(bar_high, "bar_high")
+        if low > high:
+            raise ValueError("bar_low must not exceed bar_high")
+        with self._pending_lock:
+            existing = self._filled_pending_limits.get(order.order_id)
+            if existing is not None:
+                return existing, None
+            if low > order.limit_price:
+                return order, None
+            filled = PaperOrder(
+                order.order_id,
+                order.symbol,
+                order.side,
+                order.quantity,
+                order.protective_stop_price,
+                order.submitted_at,
+                order.order_type,
+                "FILLED",
+                order.limit_price,
+            )
+            identity = hashlib.sha256(f"{order.order_id}|{occurred_at.isoformat()}|LIMIT".encode()).hexdigest()
+            commission_usd = ROUND_TURN_COMMISSION_USD * order.quantity / Decimal("2")
+            fill = PaperFill(
+                f"paper-fill:{identity[:32]}",
+                order.order_id,
+                order.limit_price,
+                order.quantity,
+                occurred_at,
+                order.limit_price,
+                Decimal("0"),
+                commission_usd,
+            )
+            self._filled_pending_limits[order.order_id] = filled
+            return filled, fill
 
 
 def _receipt(*, event_id: str, plan_id: str, stage: str, status: str, source: str, occurred_at: datetime, reason_code: str, decision: str | None = None) -> dict[str, Any]:
