@@ -158,3 +158,32 @@ def test_pending_buy_stop_fills_at_stop_when_closed_bar_trades_through():
     assert fill.price == Decimal("6000.25")
     assert fill.quantity == 1
     assert fill.occurred_at == NOW
+
+
+def test_pending_buy_stop_gap_up_fills_at_worse_bar_open():
+    broker = DeterministicPaperBroker()
+    intent = _intent()
+    pending, entry_fill = broker.submit_stop(
+        intent,
+        _market("6000.00"),
+        stop_price=Decimal("6000.25"),
+    )
+    assert entry_fill is None
+
+    filled, fill = broker.process_pending_stop(
+        pending,
+        intent,
+        bar=Bar(
+            open=Decimal("6001.00"),
+            high=Decimal("6001.50"),
+            low=Decimal("6000.75"),
+            close=Decimal("6001.25"),
+        ),
+        occurred_at=NOW,
+    )
+
+    assert filled.status == "FILLED"
+    assert fill is not None
+    assert fill.price == Decimal("6001.00")
+    assert fill.reference_price == Decimal("6000.25")
+    assert fill.slippage_points == Decimal("0.75")
