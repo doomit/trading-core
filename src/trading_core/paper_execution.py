@@ -140,6 +140,9 @@ class PaperOrder:
     quantity: int
     protective_stop_price: Decimal
     submitted_at: datetime
+    order_type: str = "MARKET"
+    status: str = "FILLED"
+    limit_price: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -351,6 +354,36 @@ class DeterministicPaperBroker:
             commission_usd,
         )
         return order, fill
+
+    def submit_limit(
+        self,
+        intent: OrderIntent,
+        market_state: MarketSnapshot,
+        *,
+        limit_price: Decimal,
+    ) -> tuple[PaperOrder, PaperFill | None]:
+        if intent.symbol != market_state.symbol:
+            raise ValueError("order intent and market symbol do not match")
+        if market_state.next_bar_start < intent.not_before:
+            raise ValueError("paper order precedes the allowed next bar")
+        limit = _decimal(limit_price, "limit_price")
+        if limit <= 0:
+            raise ValueError("limit_price must be positive")
+        identity = hashlib.sha256(
+            f"{intent.event_id}|{intent.plan_id}|{intent.plan_hash}|LIMIT|{limit}".encode()
+        ).hexdigest()
+        order = PaperOrder(
+            f"paper-order:{identity[:32]}",
+            intent.symbol,
+            intent.side,
+            intent.quantity,
+            intent.protective_stop_price,
+            market_state.next_bar_start,
+            "LIMIT",
+            "PENDING",
+            limit,
+        )
+        return order, None
 
 
 def _receipt(*, event_id: str, plan_id: str, stage: str, status: str, source: str, occurred_at: datetime, reason_code: str, decision: str | None = None) -> dict[str, Any]:
