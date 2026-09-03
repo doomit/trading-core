@@ -147,6 +147,9 @@ class PaperFill:
     price: Decimal
     quantity: int
     occurred_at: datetime
+    reference_price: Decimal | None = None
+    slippage_points: Decimal = Decimal("0")
+    commission_usd: Decimal = Decimal("0")
 
 
 @dataclass(frozen=True)
@@ -178,6 +181,8 @@ class PaperTrade:
     price: Decimal
     occurred_at: datetime
     role: str
+    slippage_points: Decimal = Decimal("0")
+    commission_usd: Decimal = Decimal("0")
 
 
 @dataclass(frozen=True)
@@ -276,10 +281,17 @@ class RiskGateway:
         stop = action.get("protective_stop")
         if not isinstance(stop, dict) or "price" not in stop:
             return RiskDecision(False, "MISSING_PROTECTIVE_STOP")
+        target = action.get("take_profit")
+        if not isinstance(target, dict) or "price" not in target:
+            return RiskDecision(False, "MISSING_TAKE_PROFIT")
         try:
             stop_price = _decimal(stop["price"], "protective_stop.price")
         except ValueError:
             return RiskDecision(False, "INVALID_PROTECTIVE_STOP")
+        try:
+            target_price = _decimal(target["price"], "take_profit.price")
+        except ValueError:
+            return RiskDecision(False, "INVALID_TAKE_PROFIT")
         quantity = action.get("quantity")
         if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
             return RiskDecision(False, "INVALID_ORDER_QUANTITY")
@@ -300,6 +312,10 @@ class RiskGateway:
             return RiskDecision(False, "INVALID_PROTECTIVE_STOP_DIRECTION")
         if decision == "SHORT" and stop_price <= expected_fill:
             return RiskDecision(False, "INVALID_PROTECTIVE_STOP_DIRECTION")
+        if decision == "LONG" and target_price <= expected_fill:
+            return RiskDecision(False, "INVALID_TAKE_PROFIT_DIRECTION")
+        if decision == "SHORT" and target_price >= expected_fill:
+            return RiskDecision(False, "INVALID_TAKE_PROFIT_DIRECTION")
         risk_usd = abs(expected_fill - stop_price) * instrument["point_value"] * quantity + ROUND_TURN_COMMISSION_USD * quantity
         if risk_usd > MAX_RISK_PER_TRADE_USD:
             return RiskDecision(False, "MAX_TRADE_RISK_EXCEEDED")
@@ -316,7 +332,18 @@ class DeterministicPaperBroker:
         identity = hashlib.sha256(f"{intent.event_id}|{intent.plan_id}|{intent.plan_hash}".encode()).hexdigest()
         order_id = f"paper-order:{identity[:32]}"
         order = PaperOrder(order_id, intent.symbol, intent.side, intent.quantity, intent.protective_stop_price, market_state.next_bar_start)
-        fill = PaperFill(f"paper-fill:{identity[:32]}", order_id, intent.expected_fill_price, intent.quantity, market_state.next_bar_start)
+        slippage_points = intent.expected_fill_price - market_state.next_bar_open
+        commission_usd = ROUND_TURN_COMMISSION_USD * intent.quantity / Decimal("2")
+        fill = PaperFill(
+            f"paper-fill:{identity[:32]}",
+            order_id,
+            intent.expected_fill_price,
+            intent.quantity,
+            market_state.next_bar_start,
+            market_state.next_bar_open,
+            slippage_points,
+            commission_usd,
+        )
         return order, fill
 
 
@@ -361,7 +388,22 @@ def execute_reserved_plan(plan: dict[str, Any], *, event_id: str, reservation_pl
         order, fill = broker.submit(risk.intent, context.market)
         record_identity = hashlib.sha256(f"{event_id}|{plan_id}|{plan_hash}|{order.order_id}|{fill.fill_id}".encode()).hexdigest()
         position = PaperPositionRecord(f"paper-position:{record_identity[:32]}", event_id, plan_id, order.order_id, fill.fill_id, order.symbol, order.side, fill.quantity, fill.price, fill.occurred_at)
-        trade = PaperTrade(f"paper-trade:{record_identity[:32]}", event_id, plan_id, order.order_id, fill.fill_id, position.position_id, order.symbol, order.side, fill.quantity, fill.price, fill.occurred_at, "ENTRY")
+        trade = PaperTrade(
+            f"paper-trade:{record_identity[:32]}",
+            event_id,
+            plan_id,
+            order.order_id,
+            fill.fill_id,
+            position.position_id,
+            order.symbol,
+            order.side,
+            fill.quantity,
+            fill.price,
+            fill.occurred_at,
+            "ENTRY",
+            fill.slippage_points,
+            fill.commission_usd,
+        )
         ordered = _receipt(event_id=event_id, plan_id=plan_id, stage="PAPER_ORDERED", status="PASS", source="paper_broker", occurred_at=order.submitted_at, reason_code="PAPER_ORDER_CREATED", decision=decision)
         filled = _receipt(event_id=event_id, plan_id=plan_id, stage="PAPER_FILLED_OR_REJECTED", status="PASS", source="paper_broker", occurred_at=fill.occurred_at, reason_code="PAPER_FILL_CREATED", decision=decision)
         return ExecutionResult(event_id, plan_id, plan_hash, "FILLED", "PAPER_ENTRY_FILLED_POSITION_OPEN", False, (received, risk_receipt, ordered, filled), order, fill, position, trade)
