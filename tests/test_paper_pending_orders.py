@@ -109,3 +109,18 @@ def test_replayed_crossing_bar_does_not_emit_a_second_pending_limit_fill():
     assert first_fill is not None
     assert replayed == filled
     assert duplicate_fill is None
+
+
+def test_buy_stop_above_market_remains_pending_without_fabricated_fill():
+    broker = DeterministicPaperBroker()
+
+    order, fill = broker.submit_stop(
+        _intent(),
+        _market("6000.00"),
+        stop_price=Decimal("6000.25"),
+    )
+
+    assert order.order_type == "STOP"
+    assert order.status == "PENDING"
+    assert order.stop_price == Decimal("6000.25")
+    assert fill is None
