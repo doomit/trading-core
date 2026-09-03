@@ -124,3 +124,32 @@ def test_buy_stop_above_market_remains_pending_without_fabricated_fill():
     assert order.status == "PENDING"
     assert order.stop_price == Decimal("6000.25")
     assert fill is None
+
+
+def test_pending_buy_stop_fills_at_stop_when_closed_bar_trades_through():
+    broker = DeterministicPaperBroker()
+    intent = _intent()
+    pending, entry_fill = broker.submit_stop(
+        intent,
+        _market("6000.00"),
+        stop_price=Decimal("6000.25"),
+    )
+    assert entry_fill is None
+
+    filled, fill = broker.process_pending_stop(
+        pending,
+        intent,
+        bar_low=Decimal("5999.75"),
+        bar_high=Decimal("6000.50"),
+        occurred_at=NOW,
+    )
+
+    assert filled.order_id == pending.order_id
+    assert filled.status == "FILLED"
+    assert filled.order_type == "STOP"
+    assert filled.stop_price == Decimal("6000.25")
+    assert fill is not None
+    assert fill.order_id == pending.order_id
+    assert fill.price == Decimal("6000.25")
+    assert fill.quantity == 1
+    assert fill.occurred_at == NOW
