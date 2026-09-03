@@ -20,7 +20,32 @@
           }
         }
       },
-      "then": {"required": ["account_capacity"]}
+      "then": {
+        "required": ["account_capacity"],
+        "properties": {
+          "account_capacity_status": {
+            "properties": {"reason": {"const": null}}
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["account_capacity_status"],
+        "properties": {
+          "account_capacity_status": {
+            "properties": {"state": {"const": "UNAVAILABLE"}},
+            "required": ["state"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "account_capacity_status": {
+            "properties": {"reason": {"const": "capacity_enrichment_failed"}}
+          }
+        }
+      }
     }
   ],
   "properties": {
