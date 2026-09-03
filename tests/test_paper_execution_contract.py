@@ -116,3 +116,13 @@ def test_position_and_trade_ids_are_distinct_but_stable():
     assert first.position.position_id == second.position.position_id
     assert first.trade.trade_id == second.trade.trade_id
     assert first.position.position_id != first.trade.trade_id
+
+
+def test_entry_fill_persists_deterministic_slippage_and_commission_economics():
+    result = _execute()
+
+    assert result.fill.reference_price == Decimal("6000.00")
+    assert result.fill.slippage_points == Decimal("0.25")
+    assert result.fill.commission_usd == Decimal("1.25")
+    assert result.trade.slippage_points == result.fill.slippage_points
+    assert result.trade.commission_usd == result.fill.commission_usd
