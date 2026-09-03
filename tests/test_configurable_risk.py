@@ -123,6 +123,13 @@ def test_valid_1m_account_a2_plan_is_risk_approved_with_brain_selected_quantity(
     assert decision.intent.risk_usd == Decimal("268.75")
 
 
+def test_paused_runtime_is_rejected_by_configurable_gateway_before_intent():
+    decision = evaluate(risk_context=context(paused=True))
+    assert decision.approved is False
+    assert decision.reason_code == "PAUSE_ACTIVE"
+    assert decision.intent is None
+
+
 @pytest.mark.parametrize(
     "document,reason",
     [
