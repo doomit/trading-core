@@ -121,3 +121,49 @@ def test_short_gap_through_stop_fills_at_worse_bar_open():
 
     assert result.reason_code == "STOP_FILLED_GAP"
     assert result.exit_price == Decimal("21030.00")
+
+
+def test_partial_target_exits_once_and_preserves_remaining_position():
+    position = PaperPosition(
+        position_id="pos-partial",
+        symbol="MES1!",
+        side="LONG",
+        quantity=3,
+        entry_price=Decimal("6000.00"),
+        stop_price=Decimal("5995.00"),
+        target_price=Decimal("6005.00"),
+        target_exit_quantity=1,
+        target_consumed=False,
+    )
+    target_bar = Bar(
+        open=Decimal("6001.00"),
+        high=Decimal("6006.00"),
+        low=Decimal("6000.00"),
+        close=Decimal("6004.00"),
+    )
+
+    first = resolve_bracket_bar(position, target_bar)
+
+    assert first.reason_code == "TARGET_PARTIAL_FILLED"
+    assert first.exit_price == Decimal("6005.00")
+    assert first.exit_quantity == 1
+    assert first.remaining_quantity == 2
+    assert first.target_consumed is True
+
+    remaining = PaperPosition(
+        position_id=position.position_id,
+        symbol=position.symbol,
+        side=position.side,
+        quantity=first.remaining_quantity,
+        entry_price=position.entry_price,
+        stop_price=position.stop_price,
+        target_price=position.target_price,
+        target_exit_quantity=1,
+        target_consumed=first.target_consumed,
+    )
+    second = resolve_bracket_bar(remaining, target_bar)
+
+    assert second.reason_code == "POSITION_OPEN"
+    assert second.exit_quantity == 0
+    assert second.remaining_quantity == 2
+    assert second.target_consumed is True
