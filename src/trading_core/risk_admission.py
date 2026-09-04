@@ -113,10 +113,49 @@ def reserve_exposure(
     )
 
 
+def release_exposure(
+    state: ExposureAdmissionState,
+    reservation: ExposureReservation,
+) -> ExposureAdmissionMutation:
+    """Build a revision-guarded reservation-release mutation for storage-level CAS.
+
+    The durable adapter remains responsible for proving that ``reservation`` is the
+    exact plan-bound reservation currently owned by the caller. This pure contract
+    fail-closes on account/session mismatch or underflow, then advances the revision
+    so storage can compare-and-set the release exactly once.
+    """
+    if not isinstance(state, ExposureAdmissionState):
+        raise TypeError("state must be ExposureAdmissionState")
+    if not isinstance(reservation, ExposureReservation):
+        raise TypeError("reservation must be ExposureReservation")
+    if reservation.account_id != state.account_id:
+        raise ValueError("reservation account_id does not match state")
+    if reservation.session_id != state.session_id:
+        raise ValueError("reservation session_id does not match state")
+    if reservation.quantity > state.reserved_contracts_total:
+        raise ValueError("reservation quantity exceeds reserved exposure")
+
+    expected_revision = state.revision
+    next_state = ExposureAdmissionState(
+        account_id=state.account_id,
+        session_id=state.session_id,
+        revision=state.revision + 1,
+        reserved_contracts_total=state.reserved_contracts_total - reservation.quantity,
+    )
+    return ExposureAdmissionMutation(
+        approved=True,
+        reason_code="RELEASED",
+        expected_revision=expected_revision,
+        next_state=next_state,
+        reservation=reservation,
+    )
+
+
 __all__ = [
     "ExposureAdmissionMutation",
     "ExposureAdmissionRequest",
     "ExposureAdmissionState",
     "ExposureReservation",
+    "release_exposure",
     "reserve_exposure",
 ]
