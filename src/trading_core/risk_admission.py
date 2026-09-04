@@ -113,10 +113,45 @@ def reserve_exposure(
     )
 
 
+def effective_exposure_contracts(
+    *,
+    open_contracts_by_plan: dict[str, int],
+    reserved_contracts_by_plan: dict[str, int],
+) -> int:
+    """Count effective exposure across the reservation-to-OPEN handoff.
+
+    A plan reservation counts before its execution is OPEN. Once that same plan is
+    durably OPEN, the OPEN quantity replaces (rather than adds to) its still-surviving
+    reservation until idempotent reservation release completes.
+    """
+    if not isinstance(open_contracts_by_plan, dict) or not isinstance(reserved_contracts_by_plan, dict):
+        raise TypeError("exposure inputs must be dictionaries keyed by plan_id")
+
+    def validated(source: dict[str, int], name: str) -> dict[str, int]:
+        values: dict[str, int] = {}
+        for plan_id, quantity in source.items():
+            if not isinstance(plan_id, str) or not plan_id.strip():
+                raise ValueError(f"{name} plan_id must be non-empty")
+            if not isinstance(quantity, int) or quantity < 1:
+                raise ValueError(f"{name} quantity must be a positive integer")
+            values[plan_id] = quantity
+        return values
+
+    opened = validated(open_contracts_by_plan, "open exposure")
+    reserved = validated(reserved_contracts_by_plan, "reserved exposure")
+    for plan_id in opened.keys() & reserved.keys():
+        if opened[plan_id] != reserved[plan_id]:
+            raise ValueError("OPEN and reserved quantities disagree for the same plan")
+    return sum(opened.values()) + sum(
+        quantity for plan_id, quantity in reserved.items() if plan_id not in opened
+    )
+
+
 __all__ = [
     "ExposureAdmissionMutation",
     "ExposureAdmissionRequest",
     "ExposureAdmissionState",
     "ExposureReservation",
+    "effective_exposure_contracts",
     "reserve_exposure",
 ]
