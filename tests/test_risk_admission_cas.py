@@ -1,6 +1,10 @@
+import pytest
+
 from trading_core.risk_admission import (
     ExposureAdmissionRequest,
     ExposureAdmissionState,
+    ExposureReservation,
+    release_exposure,
     reserve_exposure,
 )
 
@@ -54,3 +58,55 @@ def test_distinct_plan_is_rejected_after_first_reservation_is_committed():
     assert second.reason_code == "OPEN_ORDER_CONFLICT"
     assert second.expected_revision == first.next_state.revision
     assert second.next_state == first.next_state
+
+
+def test_release_mutation_decrements_only_the_owned_quantity_and_advances_revision():
+    state = ExposureAdmissionState(
+        account_id="paper-primary",
+        session_id="CME-2026-09-03",
+        revision=21,
+        reserved_contracts_total=3,
+    )
+    reservation = ExposureReservation(
+        account_id="paper-primary",
+        session_id="CME-2026-09-03",
+        plan_id="plan-a",
+        event_id="event-a",
+        symbol="MES1!",
+        quantity=1,
+        admitted_revision=20,
+    )
+
+    mutation = release_exposure(state, reservation)
+
+    assert mutation.approved is True
+    assert mutation.reason_code == "RELEASED"
+    assert mutation.expected_revision == 21
+    assert mutation.next_state.revision == 22
+    assert mutation.next_state.reserved_contracts_total == 2
+    assert mutation.reservation == reservation
+
+
+def test_release_mutation_fails_closed_on_wrong_account_or_session():
+    state = ExposureAdmissionState("paper-primary", "CME-2026-09-03", 4, 1)
+    wrong_account = ExposureReservation(
+        "paper-other", "CME-2026-09-03", "plan-a", "event-a", "MES1!", 1, 4
+    )
+    wrong_session = ExposureReservation(
+        "paper-primary", "CME-2026-09-04", "plan-a", "event-a", "MES1!", 1, 4
+    )
+
+    with pytest.raises(ValueError, match="account_id"):
+        release_exposure(state, wrong_account)
+    with pytest.raises(ValueError, match="session_id"):
+        release_exposure(state, wrong_session)
+
+
+def test_release_mutation_fails_closed_instead_of_underflowing_reserved_exposure():
+    state = ExposureAdmissionState("paper-primary", "CME-2026-09-03", 4, 0)
+    reservation = ExposureReservation(
+        "paper-primary", "CME-2026-09-03", "plan-a", "event-a", "MES1!", 1, 4
+    )
+
+    with pytest.raises(ValueError, match="exceeds reserved exposure"):
+        release_exposure(state, reservation)
