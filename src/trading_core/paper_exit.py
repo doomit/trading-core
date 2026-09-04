@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterable
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -217,4 +218,29 @@ def close_open_position(
     )
 
 
-__all__ = ["close_open_position"]
+def advance_open_position_through_bars(
+    plan: dict[str, Any],
+    entry_result: ExecutionResult,
+    bars: Iterable[tuple[Bar, datetime]],
+) -> ExecutionResult:
+    """Advance an OPEN paper result through ordered closed bars statefully.
+
+    Each bar receives the result of the preceding bar so partial exits,
+    remaining quantity, and one-shot target consumption cannot be lost by an
+    adapter that replays every bar against the original entry snapshot.
+    Processing stops at the first terminal result.
+    """
+    result = entry_result
+    for bar, occurred_at in bars:
+        if result.terminal:
+            break
+        result = close_open_position(
+            plan,
+            result,
+            bar,
+            occurred_at=occurred_at,
+        )
+    return result
+
+
+__all__ = ["advance_open_position_through_bars", "close_open_position"]
