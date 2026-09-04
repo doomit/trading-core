@@ -54,7 +54,7 @@ def _entry(plan):
     )
 
 
-def test_sequence_carries_partial_exit_state_into_next_bar():
+def _partial_then_stop_result():
     plan = _plan()
     bars = [
         (
@@ -66,8 +66,11 @@ def test_sequence_carries_partial_exit_state_into_next_bar():
             NOW + timedelta(minutes=10),
         ),
     ]
+    return advance_open_position_through_bars(plan, _entry(plan), bars)
 
-    result = advance_open_position_through_bars(plan, _entry(plan), bars)
+
+def test_sequence_carries_partial_exit_state_into_next_bar():
+    result = _partial_then_stop_result()
 
     assert result.terminal is True
     assert result.status == "CLOSED"
@@ -79,3 +82,15 @@ def test_sequence_carries_partial_exit_state_into_next_bar():
         "STOP_FILLED",
         "STOP_FILLED",
     ]
+
+
+def test_sequence_assigns_distinct_ids_to_distinct_exit_fill_receipts():
+    result = _partial_then_stop_result()
+    exit_receipts = [
+        receipt
+        for receipt in result.receipts
+        if receipt["stage"] == "PAPER_EXIT_FILLED"
+    ]
+
+    assert len(exit_receipts) == 2
+    assert len({receipt["receipt_id"] for receipt in exit_receipts}) == 2

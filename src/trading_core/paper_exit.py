@@ -178,6 +178,7 @@ def close_open_position(
         reason_code=resolution.reason_code,
         decision=plan.get("decision") if isinstance(plan.get("decision"), str) else None,
     )
+    exit_receipt["receipt_id"] = f"paper:{identity[:32]}"
     if resolution.remaining_quantity:
         return ExecutionResult(
             event_id,
