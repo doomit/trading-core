@@ -1,5 +1,3 @@
-import pytest
-
 from trading_core.risk_admission import (
     ExposureAdmissionRequest,
     ExposureAdmissionState,
@@ -96,10 +94,14 @@ def test_release_mutation_fails_closed_on_wrong_account_or_session():
         "paper-primary", "CME-2026-09-04", "plan-a", "event-a", "MES1!", 1, 4
     )
 
-    with pytest.raises(ValueError, match="account_id"):
-        release_exposure(state, wrong_account)
-    with pytest.raises(ValueError, match="session_id"):
-        release_exposure(state, wrong_session)
+    rejected_account = release_exposure(state, wrong_account)
+    rejected_session = release_exposure(state, wrong_session)
+
+    for rejected in (rejected_account, rejected_session):
+        assert rejected.approved is False
+        assert rejected.reason_code == "RESERVATION_SCOPE_MISMATCH"
+        assert rejected.expected_revision == state.revision
+        assert rejected.next_state == state
 
 
 def test_release_mutation_fails_closed_instead_of_underflowing_reserved_exposure():
@@ -108,5 +110,9 @@ def test_release_mutation_fails_closed_instead_of_underflowing_reserved_exposure
         "paper-primary", "CME-2026-09-03", "plan-a", "event-a", "MES1!", 1, 4
     )
 
-    with pytest.raises(ValueError, match="exceeds reserved exposure"):
-        release_exposure(state, reservation)
+    rejected = release_exposure(state, reservation)
+
+    assert rejected.approved is False
+    assert rejected.reason_code == "RESERVATION_NOT_AVAILABLE"
+    assert rejected.expected_revision == state.revision
+    assert rejected.next_state == state
