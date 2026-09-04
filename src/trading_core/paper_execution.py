@@ -486,7 +486,17 @@ def _rejected_before_claim(*, event_id: str, plan_id: str, plan_hash: str, conte
     return ExecutionResult(event_id, plan_id, plan_hash, "REJECTED", reason_code, True, (_receipt(event_id=event_id, plan_id=plan_id, stage="EXECUTOR_RECEIVED", status="REJECTED", source="azure_executor", occurred_at=context.now, reason_code=reason_code),))
 
 
-def execute_reserved_plan(plan: dict[str, Any], *, event_id: str, reservation_plan_hash: str, context: RiskContext, risk_gateway: RiskGateway, broker: PaperBroker, ledger: ExecutionLedger) -> ExecutionResult:
+def execute_reserved_plan(
+    plan: dict[str, Any],
+    *,
+    event_id: str,
+    reservation_plan_hash: str,
+    context: RiskContext,
+    risk_gateway: RiskGateway,
+    broker: PaperBroker,
+    ledger: ExecutionLedger,
+    pre_submit_guard: Callable[[OrderIntent], str | None] | None = None,
+) -> ExecutionResult:
     """Consume one validated/reserved trading_plan_v1 through paper execution."""
     if not isinstance(plan, dict):
         raise ValueError("plan must be an object")
@@ -512,6 +522,11 @@ def execute_reserved_plan(plan: dict[str, Any], *, event_id: str, reservation_pl
         risk_receipt = _receipt(event_id=event_id, plan_id=plan_id, stage="RISK_DECIDED", status="PASS" if risk.approved else "REJECTED", source="risk_gateway", occurred_at=context.now, reason_code=risk.reason_code, decision=decision if isinstance(decision, str) else None)
         if not risk.approved or risk.intent is None:
             return ExecutionResult(event_id, plan_id, plan_hash, "REJECTED", risk.reason_code, True, (received, risk_receipt))
+        if pre_submit_guard is not None:
+            admission_reason = pre_submit_guard(risk.intent)
+            if admission_reason:
+                admission_receipt = _receipt(event_id=event_id, plan_id=plan_id, stage="PRE_SUBMIT_ADMISSION", status="REJECTED", source="risk_gateway", occurred_at=context.now, reason_code=admission_reason, decision=decision if isinstance(decision, str) else None)
+                return ExecutionResult(event_id, plan_id, plan_hash, "REJECTED", admission_reason, True, (received, risk_receipt, admission_receipt))
         order, fill = broker.submit(risk.intent, context.market)
         record_identity = hashlib.sha256(f"{event_id}|{plan_id}|{plan_hash}|{order.order_id}|{fill.fill_id}".encode()).hexdigest()
         position = PaperPositionRecord(f"paper-position:{record_identity[:32]}", event_id, plan_id, order.order_id, fill.fill_id, order.symbol, order.side, fill.quantity, fill.price, fill.occurred_at)
