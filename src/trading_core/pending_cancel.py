@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .paper_execution import PaperOrder, _aware
+from .paper_execution import ExecutionConflict, PaperOrder, _aware
 
 
 def cancel_pending(self, order: PaperOrder, intent, *, occurred_at):
@@ -10,6 +10,15 @@ def cancel_pending(self, order: PaperOrder, intent, *, occurred_at):
     if order.symbol != intent.symbol or order.side != intent.side or order.quantity != intent.quantity:
         raise ValueError("pending order and intent do not match")
     _aware(occurred_at, "occurred_at")
+
+    filled = (
+        self._filled_pending_limits.get(order.order_id)
+        if order.order_type == "LIMIT"
+        else getattr(self, "_filled_pending_stops", {}).get(order.order_id)
+    )
+    if filled is not None:
+        raise ExecutionConflict("pending order is already filled")
+
     cancelled = PaperOrder(
         order_id=order.order_id,
         symbol=order.symbol,
