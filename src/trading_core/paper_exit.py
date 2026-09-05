@@ -188,6 +188,7 @@ def close_open_position(
         decision=plan.get("decision") if isinstance(plan.get("decision"), str) else None,
     )
     exit_receipt["receipt_id"] = f"paper:{identity[:32]}"
+    exit_trades = entry_result.exit_trades + (exit_trade,)
     if resolution.remaining_quantity:
         return ExecutionResult(
             event_id,
@@ -201,6 +202,7 @@ def close_open_position(
             exit_fill,
             updated_position,
             exit_trade,
+            exit_trades,
         )
 
     completed = _receipt(
@@ -225,6 +227,7 @@ def close_open_position(
         exit_fill,
         updated_position,
         exit_trade,
+        exit_trades,
     )
 
 
