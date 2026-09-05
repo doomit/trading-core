@@ -1,3 +1,5 @@
+import pytest
+
 from trading_core.paper_bracket import PaperBracketRelationship, apply_oco_fill, build_paper_bracket
 
 
@@ -48,6 +50,24 @@ def test_durable_record_round_trip_preserves_explicit_relationship_state():
     assert record["cancelled_order_ids"] == []
     assert record["status"] == "ACTIVE"
     assert PaperBracketRelationship.from_record(record) == bracket
+
+
+def test_durable_record_rejects_tampered_deterministic_identity():
+    bracket = build_paper_bracket(parent_order_id="paper-order:entry-123", quantity=1)
+    record = bracket.to_record()
+    record["bracket_id"] = "paper-bracket:tampered"
+
+    with pytest.raises(ValueError, match="identity"):
+        PaperBracketRelationship.from_record(record)
+
+
+def test_durable_record_rejects_unknown_status():
+    bracket = build_paper_bracket(parent_order_id="paper-order:entry-123", quantity=1)
+    record = bracket.to_record()
+    record["status"] = "MAYBE"
+
+    with pytest.raises(ValueError, match="status"):
+        PaperBracketRelationship.from_record(record)
 
 
 def test_partial_target_fill_keeps_remaining_stop_protection_active():
