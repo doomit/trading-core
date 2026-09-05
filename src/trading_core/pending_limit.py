@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from decimal import Decimal
 
-from .paper_execution import PaperFill, PaperOrder, ROUND_TURN_COMMISSION_USD, _aware, _decimal
+from .paper_execution import ExecutionConflict, PaperFill, PaperOrder, ROUND_TURN_COMMISSION_USD, _aware, _decimal
 
 
 def process_pending_limit(self, order: PaperOrder, intent, *, bar_low: Decimal, bar_high: Decimal, occurred_at):
@@ -21,6 +21,9 @@ def process_pending_limit(self, order: PaperOrder, intent, *, bar_low: Decimal, 
         raise ValueError("bar_low must not exceed bar_high")
 
     with self._pending_lock:
+        cancelled_orders = getattr(self, "_cancelled_pending_orders", {})
+        if order.order_id in cancelled_orders:
+            raise ExecutionConflict("pending order is already cancelled")
         existing = self._filled_pending_limits.get(order.order_id)
         if existing is not None:
             return existing, None
