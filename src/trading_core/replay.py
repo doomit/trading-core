@@ -7,6 +7,8 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Mapping, Sequence
 
+from .replay_result import validate_replay_result
+
 
 _ALLOWED_SPLITS = {"DEV", "VALID", "OOS"}
 _ALLOWED_SIDES = {"LONG", "SHORT"}
@@ -209,4 +211,4 @@ def run_replay(
     }
 
 
-__all__ = ["ReplayBar", "ReplayConfig", "run_replay"]
+__all__ = ["ReplayBar", "ReplayConfig", "run_replay", "validate_replay_result"]
