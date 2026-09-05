@@ -91,6 +91,7 @@ def flatten_open_position_at_session_close(
     exit_receipt = _receipt(
         event_id=entry_result.event_id,
         plan_id=entry_result.plan_id,
+        plan_hash=entry_result.plan_hash,
         stage="PAPER_EXIT_FILLED",
         status="PASS",
         source="paper_lifecycle",
@@ -100,6 +101,7 @@ def flatten_open_position_at_session_close(
     completed = _receipt(
         event_id=entry_result.event_id,
         plan_id=entry_result.plan_id,
+        plan_hash=entry_result.plan_hash,
         stage="COMPLETED",
         status="PASS",
         source="azure_executor",

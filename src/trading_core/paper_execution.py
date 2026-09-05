@@ -475,8 +475,8 @@ class DeterministicPaperBroker:
             return filled, fill
 
 
-def _receipt(*, event_id: str, plan_id: str, stage: str, status: str, source: str, occurred_at: datetime, reason_code: str, decision: str | None = None) -> dict[str, Any]:
-    identity = hashlib.sha256(f"{event_id}|{plan_id}|{stage}|{source}".encode()).hexdigest()
+def _receipt(*, event_id: str, plan_id: str, plan_hash: str, stage: str, status: str, source: str, occurred_at: datetime, reason_code: str, decision: str | None = None) -> dict[str, Any]:
+    identity = hashlib.sha256(f"{event_id}|{plan_id}|{plan_hash}|{stage}|{source}".encode()).hexdigest()
     receipt: dict[str, Any] = {"schema":"runtime_activity_v1","receipt_id":f"paper:{identity[:32]}","event_id":event_id,"plan_id":plan_id,"stage":stage,"status":status,"occurred_at":occurred_at.isoformat(),"source":source,"reason_code":reason_code}
     if decision is not None:
         receipt["details"] = {"decision": decision}
@@ -484,7 +484,7 @@ def _receipt(*, event_id: str, plan_id: str, stage: str, status: str, source: st
 
 
 def _rejected_before_claim(*, event_id: str, plan_id: str, plan_hash: str, context: RiskContext, reason_code: str) -> ExecutionResult:
-    return ExecutionResult(event_id, plan_id, plan_hash, "REJECTED", reason_code, True, (_receipt(event_id=event_id, plan_id=plan_id, stage="EXECUTOR_RECEIVED", status="REJECTED", source="azure_executor", occurred_at=context.now, reason_code=reason_code),))
+    return ExecutionResult(event_id, plan_id, plan_hash, "REJECTED", reason_code, True, (_receipt(event_id=event_id, plan_id=plan_id, plan_hash=plan_hash, stage="EXECUTOR_RECEIVED", status="REJECTED", source="azure_executor", occurred_at=context.now, reason_code=reason_code),))
 
 
 def execute_reserved_plan(
@@ -511,22 +511,22 @@ def execute_reserved_plan(
         return _rejected_before_claim(event_id=event_id, plan_id=plan_id, plan_hash=plan_hash, context=context, reason_code="RESERVATION_HASH_MISMATCH")
     def operation() -> ExecutionResult:
         decision = plan.get("decision")
-        received = _receipt(event_id=event_id, plan_id=plan_id, stage="EXECUTOR_RECEIVED", status="PASS", source="azure_executor", occurred_at=context.now, reason_code="PLAN_RESERVED_FOR_EXECUTION", decision=decision if isinstance(decision, str) else None)
+        received = _receipt(event_id=event_id, plan_id=plan_id, plan_hash=plan_hash, stage="EXECUTOR_RECEIVED", status="PASS", source="azure_executor", occurred_at=context.now, reason_code="PLAN_RESERVED_FOR_EXECUTION", decision=decision if isinstance(decision, str) else None)
         if decision in {"NO_TRADE", "HOLD"}:
             reason = f"PLAN_{decision}"
-            completed = _receipt(event_id=event_id, plan_id=plan_id, stage="COMPLETED", status="PASS", source="azure_executor", occurred_at=context.now, reason_code=reason, decision=decision)
+            completed = _receipt(event_id=event_id, plan_id=plan_id, plan_hash=plan_hash, stage="COMPLETED", status="PASS", source="azure_executor", occurred_at=context.now, reason_code=reason, decision=decision)
             return ExecutionResult(event_id, plan_id, plan_hash, "NO_EXECUTION", reason, True, (received, completed))
         try:
             risk = risk_gateway.evaluate(plan, event_id=event_id, plan_hash=plan_hash, context=context)
         except ValueError:
             risk = RiskDecision(False, "INVALID_EXECUTION_PLAN")
-        risk_receipt = _receipt(event_id=event_id, plan_id=plan_id, stage="RISK_DECIDED", status="PASS" if risk.approved else "REJECTED", source="risk_gateway", occurred_at=context.now, reason_code=risk.reason_code, decision=decision if isinstance(decision, str) else None)
+        risk_receipt = _receipt(event_id=event_id, plan_id=plan_id, plan_hash=plan_hash, stage="RISK_DECIDED", status="PASS" if risk.approved else "REJECTED", source="risk_gateway", occurred_at=context.now, reason_code=risk.reason_code, decision=decision if isinstance(decision, str) else None)
         if not risk.approved or risk.intent is None:
             return ExecutionResult(event_id, plan_id, plan_hash, "REJECTED", risk.reason_code, True, (received, risk_receipt))
         if pre_submit_guard is not None:
             admission_reason = pre_submit_guard(risk.intent)
             if admission_reason:
-                admission_receipt = _receipt(event_id=event_id, plan_id=plan_id, stage="PRE_SUBMIT_ADMISSION", status="REJECTED", source="risk_gateway", occurred_at=context.now, reason_code=admission_reason, decision=decision if isinstance(decision, str) else None)
+                admission_receipt = _receipt(event_id=event_id, plan_id=plan_id, plan_hash=plan_hash, stage="PRE_SUBMIT_ADMISSION", status="REJECTED", source="risk_gateway", occurred_at=context.now, reason_code=admission_reason, decision=decision if isinstance(decision, str) else None)
                 return ExecutionResult(event_id, plan_id, plan_hash, "REJECTED", admission_reason, True, (received, risk_receipt, admission_receipt))
         order, fill = broker.submit(risk.intent, context.market)
         record_identity = hashlib.sha256(f"{event_id}|{plan_id}|{plan_hash}|{order.order_id}|{fill.fill_id}".encode()).hexdigest()
@@ -547,8 +547,8 @@ def execute_reserved_plan(
             fill.slippage_points,
             fill.commission_usd,
         )
-        ordered = _receipt(event_id=event_id, plan_id=plan_id, stage="PAPER_ORDERED", status="PASS", source="paper_broker", occurred_at=order.submitted_at, reason_code="PAPER_ORDER_CREATED", decision=decision)
-        filled = _receipt(event_id=event_id, plan_id=plan_id, stage="PAPER_FILLED_OR_REJECTED", status="PASS", source="paper_broker", occurred_at=fill.occurred_at, reason_code="PAPER_FILL_CREATED", decision=decision)
+        ordered = _receipt(event_id=event_id, plan_id=plan_id, plan_hash=plan_hash, stage="PAPER_ORDERED", status="PASS", source="paper_broker", occurred_at=order.submitted_at, reason_code="PAPER_ORDER_CREATED", decision=decision)
+        filled = _receipt(event_id=event_id, plan_id=plan_id, plan_hash=plan_hash, stage="PAPER_FILLED_OR_REJECTED", status="PASS", source="paper_broker", occurred_at=fill.occurred_at, reason_code="PAPER_FILL_CREATED", decision=decision)
         return ExecutionResult(event_id, plan_id, plan_hash, "FILLED", "PAPER_ENTRY_FILLED_POSITION_OPEN", False, (received, risk_receipt, ordered, filled), order, fill, position, trade)
     try:
         return ledger.execute_once(plan_id=plan_id, event_id=event_id, plan_hash=plan_hash, operation=operation)
