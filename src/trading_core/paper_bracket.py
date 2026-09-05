@@ -92,6 +92,10 @@ class PaperBracketRelationship:
             raise ValueError("status must be ACTIVE or CLOSED")
         if relationship.remaining_quantity > relationship.original_quantity:
             raise ValueError("remaining_quantity cannot exceed original_quantity")
+        if relationship.status == "ACTIVE" and relationship.remaining_quantity == 0:
+            raise ValueError("ACTIVE bracket must have positive remaining_quantity")
+        if relationship.status == "CLOSED" and relationship.remaining_quantity != 0:
+            raise ValueError("CLOSED bracket must have zero remaining_quantity")
         expected_ids = _relationship_ids(relationship.parent_order_id)
         actual_ids = (
             relationship.bracket_id,
@@ -101,6 +105,9 @@ class PaperBracketRelationship:
         )
         if actual_ids != expected_ids:
             raise ValueError("durable bracket identity does not match parent_order_id")
+        child_ids = {relationship.stop_order_id, relationship.target_order_id}
+        if any(order_id not in child_ids for order_id in relationship.cancelled_order_ids):
+            raise ValueError("cancelled_order_ids must belong to this bracket")
         return relationship
 
 
