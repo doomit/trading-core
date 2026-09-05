@@ -41,20 +41,33 @@ class PaperBracketRelationship:
     target_order_id: str
     original_quantity: int
     remaining_quantity: int
+    target_quantity: int | None = None
+    target_filled_quantity: int = 0
     cancelled_order_ids: tuple[str, ...] = ()
+    filled_order_ids: tuple[str, ...] = ()
     status: str = "ACTIVE"
 
     @property
     def active_stop_quantity(self) -> int:
-        if self.status != "ACTIVE" or self.stop_order_id in self.cancelled_order_ids:
+        if (
+            self.status != "ACTIVE"
+            or self.stop_order_id in self.cancelled_order_ids
+            or self.stop_order_id in self.filled_order_ids
+        ):
             return 0
         return self.remaining_quantity
 
     @property
     def active_target_quantity(self) -> int:
-        if self.status != "ACTIVE" or self.target_order_id in self.cancelled_order_ids:
+        if (
+            self.status != "ACTIVE"
+            or self.target_order_id in self.cancelled_order_ids
+            or self.target_order_id in self.filled_order_ids
+        ):
             return 0
-        return self.remaining_quantity
+        configured = self.target_quantity if self.target_quantity is not None else self.original_quantity
+        unfilled = configured - self.target_filled_quantity
+        return min(self.remaining_quantity, max(unfilled, 0))
 
     def to_record(self) -> dict[str, Any]:
         return {
@@ -66,7 +79,10 @@ class PaperBracketRelationship:
             "target_order_id": self.target_order_id,
             "original_quantity": self.original_quantity,
             "remaining_quantity": self.remaining_quantity,
+            "target_quantity": self.target_quantity if self.target_quantity is not None else self.original_quantity,
+            "target_filled_quantity": self.target_filled_quantity,
             "cancelled_order_ids": list(self.cancelled_order_ids),
+            "filled_order_ids": list(self.filled_order_ids),
             "status": self.status,
         }
 
@@ -77,21 +93,37 @@ class PaperBracketRelationship:
         cancelled = record.get("cancelled_order_ids", [])
         if not isinstance(cancelled, list) or any(not isinstance(value, str) or not value for value in cancelled):
             raise ValueError("cancelled_order_ids must be a list of non-empty strings")
+        filled = record.get("filled_order_ids", [])
+        if not isinstance(filled, list) or any(not isinstance(value, str) or not value for value in filled):
+            raise ValueError("filled_order_ids must be a list of non-empty strings")
+        original_quantity = _quantity(record.get("original_quantity"), "original_quantity")
+        target_quantity = _quantity(record.get("target_quantity", original_quantity), "target_quantity")
         relationship = cls(
             parent_order_id=_nonempty(record.get("parent_order_id"), "parent_order_id"),
             bracket_id=_nonempty(record.get("bracket_id"), "bracket_id"),
             oco_group_id=_nonempty(record.get("oco_group_id"), "oco_group_id"),
             stop_order_id=_nonempty(record.get("stop_order_id"), "stop_order_id"),
             target_order_id=_nonempty(record.get("target_order_id"), "target_order_id"),
-            original_quantity=_quantity(record.get("original_quantity"), "original_quantity"),
+            original_quantity=original_quantity,
             remaining_quantity=_quantity(record.get("remaining_quantity"), "remaining_quantity", allow_zero=True),
+            target_quantity=target_quantity,
+            target_filled_quantity=_quantity(
+                record.get("target_filled_quantity", 0),
+                "target_filled_quantity",
+                allow_zero=True,
+            ),
             cancelled_order_ids=tuple(cancelled),
+            filled_order_ids=tuple(filled),
             status=_nonempty(record.get("status"), "status"),
         )
         if relationship.status not in {"ACTIVE", "CLOSED"}:
             raise ValueError("status must be ACTIVE or CLOSED")
         if relationship.remaining_quantity > relationship.original_quantity:
             raise ValueError("remaining_quantity cannot exceed original_quantity")
+        if relationship.target_quantity > relationship.original_quantity:
+            raise ValueError("target_quantity cannot exceed original_quantity")
+        if relationship.target_filled_quantity > relationship.target_quantity:
+            raise ValueError("target_filled_quantity cannot exceed target_quantity")
         if relationship.status == "ACTIVE" and relationship.remaining_quantity == 0:
             raise ValueError("ACTIVE bracket must have positive remaining_quantity")
         if relationship.status == "CLOSED" and relationship.remaining_quantity != 0:
@@ -108,14 +140,30 @@ class PaperBracketRelationship:
         child_ids = {relationship.stop_order_id, relationship.target_order_id}
         if any(order_id not in child_ids for order_id in relationship.cancelled_order_ids):
             raise ValueError("cancelled_order_ids must belong to this bracket")
+        if any(order_id not in child_ids for order_id in relationship.filled_order_ids):
+            raise ValueError("filled_order_ids must belong to this bracket")
+        if set(relationship.cancelled_order_ids) & set(relationship.filled_order_ids):
+            raise ValueError("a bracket child cannot be both filled and cancelled")
+        if relationship.target_order_id in relationship.filled_order_ids and relationship.target_filled_quantity != relationship.target_quantity:
+            raise ValueError("filled target child must consume target_quantity")
         return relationship
 
 
-def build_paper_bracket(*, parent_order_id: str, quantity: int) -> PaperBracketRelationship:
+def build_paper_bracket(
+    *,
+    parent_order_id: str,
+    quantity: int,
+    target_quantity: int | None = None,
+) -> PaperBracketRelationship:
     """Create deterministic child/OCO identities from an immutable entry order identity."""
 
     parent = _nonempty(parent_order_id, "parent_order_id")
     quantity = _quantity(quantity, "quantity")
+    if target_quantity is None:
+        target_quantity = quantity
+    target_quantity = _quantity(target_quantity, "target_quantity")
+    if target_quantity > quantity:
+        raise ValueError("target_quantity cannot exceed quantity")
     bracket_id, oco_group_id, stop_order_id, target_order_id = _relationship_ids(parent)
     return PaperBracketRelationship(
         parent_order_id=parent,
@@ -125,6 +173,7 @@ def build_paper_bracket(*, parent_order_id: str, quantity: int) -> PaperBracketR
         target_order_id=target_order_id,
         original_quantity=quantity,
         remaining_quantity=quantity,
+        target_quantity=target_quantity,
     )
 
 
@@ -141,28 +190,54 @@ def apply_oco_fill(
     order_id = _nonempty(filled_order_id, "filled_order_id")
     if order_id not in {relationship.stop_order_id, relationship.target_order_id}:
         raise ValueError("filled_order_id is not a child of this bracket")
-    if relationship.status != "ACTIVE" or order_id in relationship.cancelled_order_ids:
+    if (
+        relationship.status != "ACTIVE"
+        or order_id in relationship.cancelled_order_ids
+        or order_id in relationship.filled_order_ids
+    ):
         raise ValueError("bracket child is not active")
     filled_quantity = _quantity(filled_quantity, "filled_quantity")
-    if filled_quantity > relationship.remaining_quantity:
-        raise ValueError("filled_quantity exceeds remaining bracket quantity")
+    active_quantity = (
+        relationship.active_target_quantity
+        if order_id == relationship.target_order_id
+        else relationship.active_stop_quantity
+    )
+    if filled_quantity > active_quantity:
+        raise ValueError("filled_quantity exceeds active child quantity")
 
     remaining = relationship.remaining_quantity - filled_quantity
-    if remaining > 0:
-        return replace(relationship, remaining_quantity=remaining)
+    target_filled_quantity = relationship.target_filled_quantity
+    filled = relationship.filled_order_ids
+    if order_id == relationship.target_order_id:
+        target_filled_quantity += filled_quantity
+        target_quantity = relationship.target_quantity if relationship.target_quantity is not None else relationship.original_quantity
+        if target_filled_quantity == target_quantity and order_id not in filled:
+            filled = (*filled, order_id)
 
+    if remaining > 0:
+        return replace(
+            relationship,
+            remaining_quantity=remaining,
+            target_filled_quantity=target_filled_quantity,
+            filled_order_ids=filled,
+        )
+
+    if order_id not in filled:
+        filled = (*filled, order_id)
     sibling = (
         relationship.target_order_id
         if order_id == relationship.stop_order_id
         else relationship.stop_order_id
     )
     cancelled = relationship.cancelled_order_ids
-    if sibling not in cancelled:
+    if sibling not in cancelled and sibling not in filled:
         cancelled = (*cancelled, sibling)
     return replace(
         relationship,
         remaining_quantity=0,
+        target_filled_quantity=target_filled_quantity,
         cancelled_order_ids=cancelled,
+        filled_order_ids=filled,
         status="CLOSED",
     )
 
