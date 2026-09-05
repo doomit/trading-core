@@ -1,4 +1,16 @@
-from trading_core.paper_bracket import apply_oco_fill, build_paper_bracket
+from trading_core.paper_bracket import PaperBracketRelationship, apply_oco_fill, build_paper_bracket
+
+
+def test_public_package_exports_bracket_contract():
+    from trading_core import (
+        PaperBracketRelationship as ExportedRelationship,
+        apply_oco_fill as exported_apply_oco_fill,
+        build_paper_bracket as exported_build_paper_bracket,
+    )
+
+    assert ExportedRelationship is PaperBracketRelationship
+    assert exported_apply_oco_fill is apply_oco_fill
+    assert exported_build_paper_bracket is build_paper_bracket
 
 
 def test_bracket_relationship_has_deterministic_parent_sibling_and_oco_identity():
