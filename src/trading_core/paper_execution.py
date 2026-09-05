@@ -410,121 +410,134 @@ class DeterministicPaperBroker:
             f"{intent.event_id}|{intent.plan_id}|{intent.plan_hash}|STOP|{stop}".encode()
         ).hexdigest()
         order = PaperOrder(
-            f"paper-order:{identity[:32]}",
-            intent.symbol,
-            intent.side,
-            intent.quantity,
-            intent.protective_stop_price,
-            market_state.next_bar_start,
-            "STOP",
-            "PENDING",
-            None,
-            stop,
+            order_id=f"paper-order:{identity[:32]}",
+            symbol=intent.symbol,
+            side=intent.side,
+            quantity=intent.quantity,
+            protective_stop_price=intent.protective_stop_price,
+            submitted_at=market_state.next_bar_start,
+            order_type="STOP",
+            status="PENDING",
+            stop_price=stop,
         )
         return order, None
 
+    def process_pending_limit(
+        self,
+        order: PaperOrder,
+        intent: OrderIntent,
+        *,
+        bar_low: Decimal,
+        bar_high: Decimal,
+        occurred_at: datetime,
+    ) -> tuple[PaperOrder, PaperFill | None]:
+        if order.order_type != "LIMIT" or order.status != "PENDING" or order.limit_price is None:
+            raise ValueError("order must be a pending LIMIT")
+        if order.symbol != intent.symbol or order.side != intent.side or order.quantity != intent.quantity:
+            raise ValueError("pending order and intent do not match")
+        if order.side != "LONG":
+            raise ValueError("pending LIMIT side is not yet supported")
+        _aware(occurred_at, "occurred_at")
+        low = _decimal(bar_low, "bar_low")
+        high = _decimal(bar_high, "bar_high")
+        if low > high:
+            raise ValueError("bar_low must not exceed bar_high")
+        with self._pending_lock:
+            existing = self._filled_pending_limits.get(order.order_id)
+            if existing is not None:
+                return existing, None
+            if low > order.limit_price:
+                return order, None
+            filled = PaperOrder(
+                order.order_id,
+                order.symbol,
+                order.side,
+                order.quantity,
+                order.protective_stop_price,
+                order.submitted_at,
+                order.order_type,
+                "FILLED",
+                order.limit_price,
+            )
+            identity = hashlib.sha256(f"{order.order_id}|{occurred_at.isoformat()}|LIMIT".encode()).hexdigest()
+            commission_usd = ROUND_TURN_COMMISSION_USD * order.quantity / Decimal("2")
+            fill = PaperFill(
+                f"paper-fill:{identity[:32]}",
+                order.order_id,
+                order.limit_price,
+                order.quantity,
+                occurred_at,
+                order.limit_price,
+                Decimal("0"),
+                commission_usd,
+            )
+            self._filled_pending_limits[order.order_id] = filled
+            return filled, fill
 
-def _receipt(
-    *,
-    event_id: str,
-    plan_id: str,
-    stage: str,
-    status: str,
-    source: str,
-    occurred_at: datetime,
-    reason_code: str | None = None,
-    decision: str | None = None,
-) -> dict[str, Any]:
-    identity = hashlib.sha256(f"{event_id}|{plan_id}|{stage}|{status}".encode()).hexdigest()
-    receipt: dict[str, Any] = {
-        "schema": "paper_execution_receipt_v1",
-        "receipt_id": f"paper:{identity[:32]}",
-        "event_id": event_id,
-        "plan_id": plan_id,
-        "stage": stage,
-        "status": status,
-        "source": source,
-        "occurred_at": occurred_at.isoformat(),
-    }
-    if reason_code:
-        receipt["reason_code"] = reason_code
-    if decision:
-        receipt["decision"] = decision
+
+def _receipt(*, event_id: str, plan_id: str, stage: str, status: str, source: str, occurred_at: datetime, reason_code: str, decision: str | None = None) -> dict[str, Any]:
+    identity = hashlib.sha256(f"{event_id}|{plan_id}|{stage}|{source}".encode()).hexdigest()
+    receipt: dict[str, Any] = {"schema":"runtime_activity_v1","receipt_id":f"paper:{identity[:32]}","event_id":event_id,"plan_id":plan_id,"stage":stage,"status":status,"occurred_at":occurred_at.isoformat(),"source":source,"reason_code":reason_code}
+    if decision is not None:
+        receipt["details"] = {"decision": decision}
     return receipt
 
 
-def execute_plan_to_paper(
+def _rejected_before_claim(*, event_id: str, plan_id: str, plan_hash: str, context: RiskContext, reason_code: str) -> ExecutionResult:
+    return ExecutionResult(event_id, plan_id, plan_hash, "REJECTED", reason_code, True, (_receipt(event_id=event_id, plan_id=plan_id, stage="EXECUTOR_RECEIVED", status="REJECTED", source="azure_executor", occurred_at=context.now, reason_code=reason_code),))
+
+
+def execute_reserved_plan(
     plan: dict[str, Any],
     *,
     event_id: str,
+    reservation_plan_hash: str,
     context: RiskContext,
-    ledger: ExecutionLedger | None = None,
-    risk_gateway: RiskGateway | None = None,
-    paper_broker: PaperBroker | None = None,
+    risk_gateway: RiskGateway,
+    broker: PaperBroker,
+    ledger: ExecutionLedger,
+    pre_submit_guard: Callable[[OrderIntent], str | None] | None = None,
 ) -> ExecutionResult:
-    """Validate one immutable trading plan and execute at most one paper fill.
-
-    The function is deliberately fail-closed: a runtime worker may call this
-    boundary repeatedly, but only the exact same ``plan_id/event_id/hash`` tuple
-    can replay an existing result; conflicts are rejected and unsafe plans never
-    reach the broker.
-    """
+    """Consume one validated/reserved trading_plan_v1 through paper execution."""
     if not isinstance(plan, dict):
         raise ValueError("plan must be an object")
     plan_id = plan.get("plan_id")
-    if not isinstance(plan_id, str) or not plan_id:
-        raise ValueError("plan_id must be a non-empty string")
-    trigger_event_id = plan.get("trigger_event_id")
-    if trigger_event_id != event_id or plan_id != event_id:
-        raise ValueError("plan/event identity mismatch")
     plan_hash = canonical_plan_hash(plan)
-    ledger = ledger or ExecutionLedger()
-    risk_gateway = risk_gateway or RiskGateway()
-    paper_broker = paper_broker or DeterministicPaperBroker()
-
-    def _execute() -> ExecutionResult:
-        received_at = context.now
-        validated = _receipt(
-            event_id=event_id,
-            plan_id=plan_id,
-            stage="PLAN_VALIDATED",
-            status="PASS",
-            source="azure_plan_pickup",
-            occurred_at=received_at,
-            decision=plan.get("decision") if isinstance(plan.get("decision"), str) else None,
-        )
-        decision = risk_gateway.evaluate(plan, event_id=event_id, plan_hash=plan_hash, context=context)
-        risk_receipt = _receipt(
-            event_id=event_id,
-            plan_id=plan_id,
-            stage="RISK_GATEWAY",
-            status="PASS" if decision.approved else "REJECTED",
-            source="risk_gateway",
-            occurred_at=context.now,
-            reason_code=decision.reason_code,
-            decision=plan.get("decision") if isinstance(plan.get("decision"), str) else None,
-        )
-        if not decision.approved or decision.intent is None:
-            completed = _receipt(
-                event_id=event_id,
-                plan_id=plan_id,
-                stage="COMPLETED",
-                status="PASS",
-                source="azure_executor",
-                occurred_at=context.now,
-                reason_code=decision.reason_code,
-                decision=plan.get("decision") if isinstance(plan.get("decision"), str) else None,
-            )
-            return ExecutionResult(event_id, plan_id, plan_hash, "REJECTED", decision.reason_code, True, (validated, risk_receipt, completed))
-        order, fill = paper_broker.submit(decision.intent, context.market)
-        position_id = f"paper-position:{order.order_id.removeprefix('paper-order:')}"
-        entry_trade = PaperTrade(
-            f"paper-entry-trade:{fill.fill_id.removeprefix('paper-fill:')}",
+    if not isinstance(event_id, str) or not event_id or not isinstance(plan_id, str) or not plan_id:
+        raise ValueError("event_id and plan_id must be non-empty strings")
+    if plan.get("schema") != "trading_plan_v1" or plan.get("trigger_event_id") != event_id or plan_id != event_id:
+        return _rejected_before_claim(event_id=event_id, plan_id=plan_id, plan_hash=plan_hash, context=context, reason_code="INVALID_EXECUTION_IDENTITY")
+    if reservation_plan_hash != plan_hash:
+        return _rejected_before_claim(event_id=event_id, plan_id=plan_id, plan_hash=plan_hash, context=context, reason_code="RESERVATION_HASH_MISMATCH")
+    def operation() -> ExecutionResult:
+        decision = plan.get("decision")
+        received = _receipt(event_id=event_id, plan_id=plan_id, stage="EXECUTOR_RECEIVED", status="PASS", source="azure_executor", occurred_at=context.now, reason_code="PLAN_RESERVED_FOR_EXECUTION", decision=decision if isinstance(decision, str) else None)
+        if decision in {"NO_TRADE", "HOLD"}:
+            reason = f"PLAN_{decision}"
+            completed = _receipt(event_id=event_id, plan_id=plan_id, stage="COMPLETED", status="PASS", source="azure_executor", occurred_at=context.now, reason_code=reason, decision=decision)
+            return ExecutionResult(event_id, plan_id, plan_hash, "NO_EXECUTION", reason, True, (received, completed))
+        try:
+            risk = risk_gateway.evaluate(plan, event_id=event_id, plan_hash=plan_hash, context=context)
+        except ValueError:
+            risk = RiskDecision(False, "INVALID_EXECUTION_PLAN")
+        risk_receipt = _receipt(event_id=event_id, plan_id=plan_id, stage="RISK_DECIDED", status="PASS" if risk.approved else "REJECTED", source="risk_gateway", occurred_at=context.now, reason_code=risk.reason_code, decision=decision if isinstance(decision, str) else None)
+        if not risk.approved or risk.intent is None:
+            return ExecutionResult(event_id, plan_id, plan_hash, "REJECTED", risk.reason_code, True, (received, risk_receipt))
+        if pre_submit_guard is not None:
+            admission_reason = pre_submit_guard(risk.intent)
+            if admission_reason:
+                admission_receipt = _receipt(event_id=event_id, plan_id=plan_id, stage="PRE_SUBMIT_ADMISSION", status="REJECTED", source="risk_gateway", occurred_at=context.now, reason_code=admission_reason, decision=decision if isinstance(decision, str) else None)
+                return ExecutionResult(event_id, plan_id, plan_hash, "REJECTED", admission_reason, True, (received, risk_receipt, admission_receipt))
+        order, fill = broker.submit(risk.intent, context.market)
+        record_identity = hashlib.sha256(f"{event_id}|{plan_id}|{plan_hash}|{order.order_id}|{fill.fill_id}".encode()).hexdigest()
+        position = PaperPositionRecord(f"paper-position:{record_identity[:32]}", event_id, plan_id, order.order_id, fill.fill_id, order.symbol, order.side, fill.quantity, fill.price, fill.occurred_at)
+        trade = PaperTrade(
+            f"paper-trade:{record_identity[:32]}",
             event_id,
             plan_id,
             order.order_id,
             fill.fill_id,
-            position_id,
+            position.position_id,
             order.symbol,
             order.side,
             fill.quantity,
@@ -534,40 +547,13 @@ def execute_plan_to_paper(
             fill.slippage_points,
             fill.commission_usd,
         )
-        position = PaperPositionRecord(
-            position_id,
-            event_id,
-            plan_id,
-            order.order_id,
-            fill.fill_id,
-            order.symbol,
-            order.side,
-            fill.quantity,
-            fill.price,
-            fill.occurred_at,
-        )
-        fill_receipt = _receipt(
-            event_id=event_id,
-            plan_id=plan_id,
-            stage="PAPER_FILL",
-            status="PASS",
-            source="paper_broker",
-            occurred_at=fill.occurred_at,
-            reason_code="PAPER_ENTRY_FILLED_POSITION_OPEN",
-            decision=order.side,
-        )
-        return ExecutionResult(
-            event_id,
-            plan_id,
-            plan_hash,
-            "OPEN",
-            "PAPER_ENTRY_FILLED_POSITION_OPEN",
-            False,
-            (validated, risk_receipt, fill_receipt),
-            order,
-            fill,
-            position,
-            entry_trade,
-        )
+        ordered = _receipt(event_id=event_id, plan_id=plan_id, stage="PAPER_ORDERED", status="PASS", source="paper_broker", occurred_at=order.submitted_at, reason_code="PAPER_ORDER_CREATED", decision=decision)
+        filled = _receipt(event_id=event_id, plan_id=plan_id, stage="PAPER_FILLED_OR_REJECTED", status="PASS", source="paper_broker", occurred_at=fill.occurred_at, reason_code="PAPER_FILL_CREATED", decision=decision)
+        return ExecutionResult(event_id, plan_id, plan_hash, "FILLED", "PAPER_ENTRY_FILLED_POSITION_OPEN", False, (received, risk_receipt, ordered, filled), order, fill, position, trade)
+    try:
+        return ledger.execute_once(plan_id=plan_id, event_id=event_id, plan_hash=plan_hash, operation=operation)
+    except ExecutionConflict:
+        return _rejected_before_claim(event_id=event_id, plan_id=plan_id, plan_hash=plan_hash, context=context, reason_code="PLAN_ID_EXECUTION_CONFLICT")
 
-    return ledger.execute_once(plan_id=plan_id, event_id=event_id, plan_hash=plan_hash, operation=_execute)
+
+__all__ = ["AccountState","DeterministicPaperBroker","ExecutionLedger","ExecutionResult","MarketSnapshot","OrderIntent","PaperBroker","PaperFill","PaperOrder","PaperPositionRecord","PaperTrade","RiskContext","RiskDecision","RiskGateway","canonical_plan_hash","execute_reserved_plan"]
