@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 
-from .paper_execution import PaperOrder
+from .paper_execution import PaperOrder, _aware
 
 
 def _replacement_order_id(previous_order_id: str, submitted_order_id: str) -> str:
@@ -16,6 +16,9 @@ def replace_pending_stop(self, order: PaperOrder, intent, market_state, *, new_s
     """Cancel one pending STOP and create a deterministic replacement identity."""
     if order.order_type != "STOP" or order.status != "PENDING":
         raise ValueError("order must be a pending STOP")
+    _aware(occurred_at, "occurred_at")
+    if market_state.next_bar_start < occurred_at:
+        raise ValueError("replacement market state predates replace time")
     cancelled, cancel_fill = self.cancel_pending(order, intent, occurred_at=occurred_at)
     if cancel_fill is not None:
         raise RuntimeError("pending cancellation must not emit a fill")
