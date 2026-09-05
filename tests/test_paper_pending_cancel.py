@@ -88,3 +88,36 @@ def test_cancel_pending_stop_fails_closed_after_same_order_already_filled():
 
     with pytest.raises(ExecutionConflict, match="already filled"):
         broker.cancel_pending(pending, intent, occurred_at=NOW)
+
+
+def test_process_pending_limit_fails_closed_after_same_order_cancelled():
+    intent = _intent(event_id="evt_mes_limit_cancel_then_fill")
+    broker = DeterministicPaperBroker()
+    pending, _ = broker.submit_limit(intent, _market(), limit_price=Decimal("5999.75"))
+    cancelled, _ = broker.cancel_pending(pending, intent, occurred_at=NOW)
+    assert cancelled.status == "CANCELLED"
+
+    with pytest.raises(ExecutionConflict, match="already cancelled"):
+        broker.process_pending_limit(
+            pending,
+            intent,
+            bar_low=Decimal("5999.50"),
+            bar_high=Decimal("6000.25"),
+            occurred_at=NOW,
+        )
+
+
+def test_process_pending_stop_fails_closed_after_same_order_cancelled():
+    intent = _intent(event_id="evt_mes_stop_cancel_then_fill")
+    broker = DeterministicPaperBroker()
+    pending, _ = broker.submit_stop(intent, _market(), stop_price=Decimal("6000.25"))
+    cancelled, _ = broker.cancel_pending(pending, intent, occurred_at=NOW)
+    assert cancelled.status == "CANCELLED"
+
+    with pytest.raises(ExecutionConflict, match="already cancelled"):
+        broker.process_pending_stop(
+            pending,
+            intent,
+            bar=Bar(open=Decimal("6000.50"), high=Decimal("6001.00"), low=Decimal("5999.75"), close=Decimal("6000.75")),
+            occurred_at=NOW,
+        )
