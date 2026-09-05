@@ -1,9 +1,10 @@
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from trading_core.paper_bracket import PaperBracketRelationship, build_paper_bracket
 from trading_core.paper_execution import ExecutionResult, PaperPositionRecord, canonical_plan_hash
-from trading_core.paper_exit import advance_open_position_through_bars_with_bracket
+from trading_core.paper_exit_state import advance_open_position_through_bars_with_bracket
 from trading_core.paper_lifecycle import Bar
 
 NOW = datetime(2026, 9, 5, 12, 15, tzinfo=timezone.utc)
@@ -84,7 +85,7 @@ def test_partial_target_advances_authoritative_bracket_and_survives_restart():
     assert restored == updated
 
 
-def test_restored_bracket_is_authoritative_for_later_stop_and_closes_oco():
+def test_restored_bracket_prevents_duplicate_target_without_receipt_then_later_stop_closes_oco():
     plan = _plan()
     entry = _entry(plan)
     bracket = build_paper_bracket(
@@ -98,12 +99,32 @@ def test_restored_bracket_is_authoritative_for_later_stop_and_closes_oco():
     )
     partial, updated = advance_open_position_through_bars_with_bracket(plan, entry, bracket, [target_bar])
     restored = PaperBracketRelationship.from_record(updated.to_record())
-    stop_bar = (
-        Bar(open=Decimal("5998"), high=Decimal("6000"), low=Decimal("5994"), close=Decimal("5996")),
+
+    # Simulate an adapter restart where the authoritative bracket checkpoint is
+    # restored but legacy receipt history is unavailable. A target-only bar must
+    # not manufacture a second one-shot target fill.
+    restarted = replace(partial, receipts=())
+    target_again_bar = (
+        Bar(open=Decimal("6001"), high=Decimal("6007"), low=Decimal("6000"), close=Decimal("6004")),
         NOW + timedelta(minutes=10),
     )
+    still_open, unchanged = advance_open_position_through_bars_with_bracket(
+        plan,
+        restarted,
+        restored,
+        [target_again_bar],
+    )
 
-    result, closed = advance_open_position_through_bars_with_bracket(plan, partial, restored, [stop_bar])
+    assert still_open.terminal is False
+    assert still_open.position is not None and still_open.position.quantity == 2
+    assert len(still_open.exit_trades) == 1
+    assert unchanged == restored
+
+    stop_bar = (
+        Bar(open=Decimal("5998"), high=Decimal("6000"), low=Decimal("5994"), close=Decimal("5996")),
+        NOW + timedelta(minutes=15),
+    )
+    result, closed = advance_open_position_through_bars_with_bracket(plan, still_open, unchanged, [stop_bar])
 
     assert result.terminal is True
     assert result.reason_code == "STOP_FILLED"
