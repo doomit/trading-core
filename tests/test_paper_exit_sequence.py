@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+from trading_core.paper_bracket import build_paper_bracket
 from trading_core.paper_execution import ExecutionResult, PaperPositionRecord, canonical_plan_hash
 from trading_core.paper_exit import advance_open_position_through_bars
 from trading_core.paper_lifecycle import Bar
@@ -94,3 +95,29 @@ def test_sequence_assigns_distinct_ids_to_distinct_exit_fill_receipts():
 
     assert len(exit_receipts) == 2
     assert len({receipt["receipt_id"] for receipt in exit_receipts}) == 2
+
+
+def test_partial_target_fill_uses_deterministic_bracket_target_child_order_identity():
+    plan = _plan()
+    result = advance_open_position_through_bars(
+        plan,
+        _entry(plan),
+        [
+            (
+                Bar(open=Decimal("6001"), high=Decimal("6006"), low=Decimal("6000"), close=Decimal("6004")),
+                NOW + timedelta(minutes=5),
+            ),
+        ],
+    )
+    relationship = build_paper_bracket(parent_order_id="paper-order:sequence", quantity=3)
+
+    assert result.order is not None
+    assert result.order.order_id == relationship.target_order_id
+
+
+def test_later_stop_fill_uses_same_bracket_stop_child_order_identity():
+    result = _partial_then_stop_result()
+    relationship = build_paper_bracket(parent_order_id="paper-order:sequence", quantity=3)
+
+    assert result.order is not None
+    assert result.order.order_id == relationship.stop_order_id
