@@ -31,6 +31,25 @@ def test_bracket_relationship_has_deterministic_parent_sibling_and_oco_identity(
     assert first.status == "ACTIVE"
 
 
+def test_durable_record_round_trip_preserves_explicit_relationship_state():
+    bracket = build_paper_bracket(parent_order_id="paper-order:entry-123", quantity=2)
+    bracket = apply_oco_fill(bracket, filled_order_id=bracket.target_order_id, filled_quantity=1)
+
+    record = bracket.to_record()
+
+    assert record["schema"] == "paper_bracket_relationship_v1"
+    assert record["parent_order_id"] == bracket.parent_order_id
+    assert record["bracket_id"] == bracket.bracket_id
+    assert record["oco_group_id"] == bracket.oco_group_id
+    assert record["stop_order_id"] == bracket.stop_order_id
+    assert record["target_order_id"] == bracket.target_order_id
+    assert record["original_quantity"] == 2
+    assert record["remaining_quantity"] == 1
+    assert record["cancelled_order_ids"] == []
+    assert record["status"] == "ACTIVE"
+    assert PaperBracketRelationship.from_record(record) == bracket
+
+
 def test_partial_target_fill_keeps_remaining_stop_protection_active():
     bracket = build_paper_bracket(parent_order_id="paper-order:entry-123", quantity=2)
 
