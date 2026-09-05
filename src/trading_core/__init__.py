@@ -10,6 +10,10 @@ from .paper_bracket import (
     cancel_paper_bracket,
 )
 from .paper_exit import close_open_position
+from .paper_exit_state import (
+    advance_open_position_through_bars_with_bracket,
+    close_open_position_with_bracket,
+)
 from .paper_session_flatten import flatten_open_position_at_session_close
 from .pending_cancel import cancel_pending
 from .pending_limit import process_pending_limit
@@ -31,10 +35,12 @@ risk_admission.release_exposure = release_exposure
 
 __all__ = [
     "PaperBracketRelationship",
+    "advance_open_position_through_bars_with_bracket",
     "apply_oco_fill",
     "build_paper_bracket",
     "cancel_paper_bracket",
     "close_open_position",
+    "close_open_position_with_bracket",
     "flatten_open_position_at_session_close",
     "paper_execution",
 ]
