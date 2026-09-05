@@ -70,6 +70,35 @@ def test_durable_record_rejects_unknown_status():
         PaperBracketRelationship.from_record(record)
 
 
+def test_durable_record_rejects_active_state_with_zero_remaining_quantity():
+    bracket = build_paper_bracket(parent_order_id="paper-order:entry-123", quantity=1)
+    record = bracket.to_record()
+    record["remaining_quantity"] = 0
+
+    with pytest.raises(ValueError, match="ACTIVE"):
+        PaperBracketRelationship.from_record(record)
+
+
+def test_durable_record_rejects_closed_state_with_remaining_quantity():
+    bracket = build_paper_bracket(parent_order_id="paper-order:entry-123", quantity=2)
+    record = bracket.to_record()
+    record["status"] = "CLOSED"
+    record["remaining_quantity"] = 1
+    record["cancelled_order_ids"] = [bracket.stop_order_id]
+
+    with pytest.raises(ValueError, match="CLOSED"):
+        PaperBracketRelationship.from_record(record)
+
+
+def test_durable_record_rejects_unknown_cancelled_order_identity():
+    bracket = build_paper_bracket(parent_order_id="paper-order:entry-123", quantity=1)
+    record = bracket.to_record()
+    record["cancelled_order_ids"] = ["paper-order:unrelated"]
+
+    with pytest.raises(ValueError, match="cancelled"):
+        PaperBracketRelationship.from_record(record)
+
+
 def test_partial_target_fill_keeps_remaining_stop_protection_active():
     bracket = build_paper_bracket(parent_order_id="paper-order:entry-123", quantity=2)
 
