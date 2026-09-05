@@ -54,6 +54,51 @@ def _open_entry() -> ExecutionResult:
     )
 
 
+def _open_short_entry() -> ExecutionResult:
+    order = PaperOrder("paper-order:short-entry", "MNQ1!", "SHORT", 2, Decimal("21450.00"), OPENED)
+    fill = PaperFill("paper-fill:short-entry", order.order_id, Decimal("21448.75"), 2, OPENED)
+    position = PaperPositionRecord(
+        "paper-position:short-entry",
+        "evt_session_flatten_short",
+        "evt_session_flatten_short",
+        order.order_id,
+        fill.fill_id,
+        "MNQ1!",
+        "SHORT",
+        2,
+        fill.price,
+        OPENED,
+        "OPEN",
+    )
+    trade = PaperTrade(
+        "paper-trade:short-entry",
+        "evt_session_flatten_short",
+        "evt_session_flatten_short",
+        order.order_id,
+        fill.fill_id,
+        position.position_id,
+        "MNQ1!",
+        "SHORT",
+        2,
+        fill.price,
+        OPENED,
+        "ENTRY",
+    )
+    return ExecutionResult(
+        "evt_session_flatten_short",
+        "evt_session_flatten_short",
+        "plan-hash-session-flatten-short",
+        "OPEN",
+        "PAPER_FILLED",
+        False,
+        (),
+        order,
+        fill,
+        position,
+        trade,
+    )
+
+
 def test_session_flatten_closes_open_position_at_observed_market_price():
     result = flatten_open_position_at_session_close(
         _open_entry(),
@@ -73,6 +118,34 @@ def test_session_flatten_closes_open_position_at_observed_market_price():
     assert result.fill.slippage_points == Decimal("0")
     assert result.trade is not None and result.trade.role == "EXIT"
     assert result.trade.position_id == "paper-position:entry"
+    assert result.receipts[-2]["stage"] == "PAPER_EXIT_FILLED"
+    assert result.receipts[-2]["reason_code"] == "SESSION_FLATTENED"
+    assert result.receipts[-1]["stage"] == "COMPLETED"
+
+
+def test_session_flatten_closes_short_with_buy_to_cover_for_full_open_quantity():
+    result = flatten_open_position_at_session_close(
+        _open_short_entry(),
+        market_price=Decimal("21452.25"),
+        occurred_at=CLOSED,
+    )
+
+    assert result.status == "CLOSED"
+    assert result.terminal is True
+    assert result.reason_code == "SESSION_FLATTENED"
+    assert result.position is not None and result.position.status == "CLOSED"
+    assert result.position.side == "SHORT"
+    assert result.position.quantity == 0
+    assert result.order is not None and result.order.side == "LONG"
+    assert result.order.quantity == 2
+    assert result.fill is not None and result.fill.price == Decimal("21452.25")
+    assert result.fill.quantity == 2
+    assert result.fill.reference_price == Decimal("21452.25")
+    assert result.fill.slippage_points == Decimal("0")
+    assert result.trade is not None and result.trade.role == "EXIT"
+    assert result.trade.side == "LONG"
+    assert result.trade.quantity == 2
+    assert result.trade.position_id == "paper-position:short-entry"
     assert result.receipts[-2]["stage"] == "PAPER_EXIT_FILLED"
     assert result.receipts[-2]["reason_code"] == "SESSION_FLATTENED"
     assert result.receipts[-1]["stage"] == "COMPLETED"
