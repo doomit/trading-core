@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from decimal import Decimal
 
-from .paper_execution import PaperFill, PaperOrder, ROUND_TURN_COMMISSION_USD, _aware
+from .paper_execution import ExecutionConflict, PaperFill, PaperOrder, ROUND_TURN_COMMISSION_USD, _aware
 from .paper_lifecycle import Bar
 
 
@@ -20,6 +20,9 @@ def process_pending_stop(self, order: PaperOrder, intent, *, bar: Bar, occurred_
     _aware(occurred_at, "occurred_at")
 
     with self._pending_lock:
+        cancelled_orders = getattr(self, "_cancelled_pending_orders", {})
+        if order.order_id in cancelled_orders:
+            raise ExecutionConflict("pending order is already cancelled")
         filled_stops = getattr(self, "_filled_pending_stops", None)
         if filled_stops is None:
             filled_stops = {}
