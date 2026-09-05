@@ -11,24 +11,34 @@ def cancel_pending(self, order: PaperOrder, intent, *, occurred_at):
         raise ValueError("pending order and intent do not match")
     _aware(occurred_at, "occurred_at")
 
-    filled = (
-        self._filled_pending_limits.get(order.order_id)
-        if order.order_type == "LIMIT"
-        else getattr(self, "_filled_pending_stops", {}).get(order.order_id)
-    )
-    if filled is not None:
-        raise ExecutionConflict("pending order is already filled")
+    with self._pending_lock:
+        cancelled_orders = getattr(self, "_cancelled_pending_orders", None)
+        if cancelled_orders is None:
+            cancelled_orders = {}
+            self._cancelled_pending_orders = cancelled_orders
+        existing_cancelled = cancelled_orders.get(order.order_id)
+        if existing_cancelled is not None:
+            return existing_cancelled, None
 
-    cancelled = PaperOrder(
-        order_id=order.order_id,
-        symbol=order.symbol,
-        side=order.side,
-        quantity=order.quantity,
-        protective_stop_price=order.protective_stop_price,
-        submitted_at=order.submitted_at,
-        order_type=order.order_type,
-        status="CANCELLED",
-        limit_price=order.limit_price,
-        stop_price=order.stop_price,
-    )
-    return cancelled, None
+        filled = (
+            self._filled_pending_limits.get(order.order_id)
+            if order.order_type == "LIMIT"
+            else getattr(self, "_filled_pending_stops", {}).get(order.order_id)
+        )
+        if filled is not None:
+            raise ExecutionConflict("pending order is already filled")
+
+        cancelled = PaperOrder(
+            order_id=order.order_id,
+            symbol=order.symbol,
+            side=order.side,
+            quantity=order.quantity,
+            protective_stop_price=order.protective_stop_price,
+            submitted_at=order.submitted_at,
+            order_type=order.order_type,
+            status="CANCELLED",
+            limit_price=order.limit_price,
+            stop_price=order.stop_price,
+        )
+        cancelled_orders[order.order_id] = cancelled
+        return cancelled, None
