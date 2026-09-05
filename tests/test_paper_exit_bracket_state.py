@@ -2,6 +2,8 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+import pytest
+
 from trading_core.paper_bracket import PaperBracketRelationship, build_paper_bracket
 from trading_core.paper_execution import ExecutionResult, PaperPositionRecord, canonical_plan_hash
 from trading_core.paper_exit_state import advance_open_position_through_bars_with_bracket
@@ -136,3 +138,21 @@ def test_restored_bracket_prevents_duplicate_target_without_receipt_then_later_s
     assert bracket.stop_order_id in closed.filled_order_ids
     assert bracket.target_order_id in closed.filled_order_ids
     assert closed.cancelled_order_ids == ()
+
+
+def test_relationship_quantity_mismatch_fails_closed_before_advancing_market_state():
+    plan = _plan()
+    entry = _entry(plan)
+    bracket = build_paper_bracket(
+        parent_order_id=entry.position.order_id,
+        quantity=3,
+        target_quantity=1,
+    )
+    corrupted = replace(bracket, remaining_quantity=2)
+    bar = (
+        Bar(open=Decimal("6001"), high=Decimal("6006"), low=Decimal("6000"), close=Decimal("6004")),
+        NOW + timedelta(minutes=5),
+    )
+
+    with pytest.raises(ValueError, match="remaining_quantity does not match open position"):
+        advance_open_position_through_bars_with_bracket(plan, entry, corrupted, [bar])
