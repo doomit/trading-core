@@ -10,6 +10,7 @@ from .pending_limit import process_pending_limit
 from .pending_replace import replace_pending_limit
 from .pending_session_close import cancel_pending_for_session_close
 from .pending_stop import process_pending_stop
+from .pending_stop_replace import replace_pending_stop
 from .risk_admission_release import release_exposure
 
 paper_execution.close_open_position = close_open_position
@@ -18,6 +19,7 @@ paper_execution.DeterministicPaperBroker.process_pending_limit = process_pending
 paper_execution.DeterministicPaperBroker.replace_pending_limit = replace_pending_limit
 paper_execution.DeterministicPaperBroker.cancel_pending_for_session_close = cancel_pending_for_session_close
 paper_execution.DeterministicPaperBroker.process_pending_stop = process_pending_stop
+paper_execution.DeterministicPaperBroker.replace_pending_stop = replace_pending_stop
 paper_exit.flatten_open_position_at_session_close = flatten_open_position_at_session_close
 risk_admission.release_exposure = release_exposure
 
