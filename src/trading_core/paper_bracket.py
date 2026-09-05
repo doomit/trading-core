@@ -2,11 +2,20 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, replace
+from typing import Any
 
 
 def _nonempty(value: str, field: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"{field} must be a non-empty string")
+    return value
+
+
+def _quantity(value: Any, field: str, *, allow_zero: bool = False) -> int:
+    minimum = 0 if allow_zero else 1
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        qualifier = "nonnegative" if allow_zero else "positive"
+        raise ValueError(f"{field} must be a {qualifier} integer")
     return value
 
 
@@ -36,13 +45,48 @@ class PaperBracketRelationship:
             return 0
         return self.remaining_quantity
 
+    def to_record(self) -> dict[str, Any]:
+        return {
+            "schema": "paper_bracket_relationship_v1",
+            "parent_order_id": self.parent_order_id,
+            "bracket_id": self.bracket_id,
+            "oco_group_id": self.oco_group_id,
+            "stop_order_id": self.stop_order_id,
+            "target_order_id": self.target_order_id,
+            "original_quantity": self.original_quantity,
+            "remaining_quantity": self.remaining_quantity,
+            "cancelled_order_ids": list(self.cancelled_order_ids),
+            "status": self.status,
+        }
+
+    @classmethod
+    def from_record(cls, record: dict[str, Any]) -> PaperBracketRelationship:
+        if not isinstance(record, dict) or record.get("schema") != "paper_bracket_relationship_v1":
+            raise ValueError("record must be paper_bracket_relationship_v1")
+        cancelled = record.get("cancelled_order_ids", [])
+        if not isinstance(cancelled, list) or any(not isinstance(value, str) or not value for value in cancelled):
+            raise ValueError("cancelled_order_ids must be a list of non-empty strings")
+        relationship = cls(
+            parent_order_id=_nonempty(record.get("parent_order_id"), "parent_order_id"),
+            bracket_id=_nonempty(record.get("bracket_id"), "bracket_id"),
+            oco_group_id=_nonempty(record.get("oco_group_id"), "oco_group_id"),
+            stop_order_id=_nonempty(record.get("stop_order_id"), "stop_order_id"),
+            target_order_id=_nonempty(record.get("target_order_id"), "target_order_id"),
+            original_quantity=_quantity(record.get("original_quantity"), "original_quantity"),
+            remaining_quantity=_quantity(record.get("remaining_quantity"), "remaining_quantity", allow_zero=True),
+            cancelled_order_ids=tuple(cancelled),
+            status=_nonempty(record.get("status"), "status"),
+        )
+        if relationship.remaining_quantity > relationship.original_quantity:
+            raise ValueError("remaining_quantity cannot exceed original_quantity")
+        return relationship
+
 
 def build_paper_bracket(*, parent_order_id: str, quantity: int) -> PaperBracketRelationship:
     """Create deterministic child/OCO identities from an immutable entry order identity."""
 
     parent = _nonempty(parent_order_id, "parent_order_id")
-    if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
-        raise ValueError("quantity must be a positive integer")
+    quantity = _quantity(quantity, "quantity")
 
     identity = hashlib.sha256(f"{parent}|PAPER_BRACKET_V1".encode()).hexdigest()
     suffix = identity[:32]
@@ -72,8 +116,7 @@ def apply_oco_fill(
         raise ValueError("filled_order_id is not a child of this bracket")
     if relationship.status != "ACTIVE" or order_id in relationship.cancelled_order_ids:
         raise ValueError("bracket child is not active")
-    if isinstance(filled_quantity, bool) or not isinstance(filled_quantity, int) or filled_quantity < 1:
-        raise ValueError("filled_quantity must be a positive integer")
+    filled_quantity = _quantity(filled_quantity, "filled_quantity")
     if filled_quantity > relationship.remaining_quantity:
         raise ValueError("filled_quantity exceeds remaining bracket quantity")
 
