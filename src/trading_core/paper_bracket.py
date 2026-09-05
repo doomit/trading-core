@@ -19,6 +19,17 @@ def _quantity(value: Any, field: str, *, allow_zero: bool = False) -> int:
     return value
 
 
+def _relationship_ids(parent_order_id: str) -> tuple[str, str, str, str]:
+    identity = hashlib.sha256(f"{parent_order_id}|PAPER_BRACKET_V1".encode()).hexdigest()
+    suffix = identity[:32]
+    return (
+        f"paper-bracket:{suffix}",
+        f"paper-oco:{suffix}",
+        f"paper-order:stop:{suffix}",
+        f"paper-order:target:{suffix}",
+    )
+
+
 @dataclass(frozen=True)
 class PaperBracketRelationship:
     """Durable broker-neutral identity/state for one entry's protective OCO bracket."""
@@ -77,8 +88,19 @@ class PaperBracketRelationship:
             cancelled_order_ids=tuple(cancelled),
             status=_nonempty(record.get("status"), "status"),
         )
+        if relationship.status not in {"ACTIVE", "CLOSED"}:
+            raise ValueError("status must be ACTIVE or CLOSED")
         if relationship.remaining_quantity > relationship.original_quantity:
             raise ValueError("remaining_quantity cannot exceed original_quantity")
+        expected_ids = _relationship_ids(relationship.parent_order_id)
+        actual_ids = (
+            relationship.bracket_id,
+            relationship.oco_group_id,
+            relationship.stop_order_id,
+            relationship.target_order_id,
+        )
+        if actual_ids != expected_ids:
+            raise ValueError("durable bracket identity does not match parent_order_id")
         return relationship
 
 
@@ -87,15 +109,13 @@ def build_paper_bracket(*, parent_order_id: str, quantity: int) -> PaperBracketR
 
     parent = _nonempty(parent_order_id, "parent_order_id")
     quantity = _quantity(quantity, "quantity")
-
-    identity = hashlib.sha256(f"{parent}|PAPER_BRACKET_V1".encode()).hexdigest()
-    suffix = identity[:32]
+    bracket_id, oco_group_id, stop_order_id, target_order_id = _relationship_ids(parent)
     return PaperBracketRelationship(
         parent_order_id=parent,
-        bracket_id=f"paper-bracket:{suffix}",
-        oco_group_id=f"paper-oco:{suffix}",
-        stop_order_id=f"paper-order:stop:{suffix}",
-        target_order_id=f"paper-order:target:{suffix}",
+        bracket_id=bracket_id,
+        oco_group_id=oco_group_id,
+        stop_order_id=stop_order_id,
+        target_order_id=target_order_id,
         original_quantity=quantity,
         remaining_quantity=quantity,
     )
