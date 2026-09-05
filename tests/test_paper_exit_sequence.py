@@ -131,3 +131,76 @@ def test_terminal_result_preserves_all_realized_exit_trades_for_accounting_proje
         (2, Decimal("5995.00")),
     ]
     assert len({trade.trade_id for trade in result.exit_trades}) == 2
+
+
+def test_short_partial_target_then_later_stop_preserves_symmetric_child_and_trade_history():
+    plan = {
+        "schema": "trading_plan_v1",
+        "plan_id": EVENT_ID,
+        "trigger_event_id": EVENT_ID,
+        "created_at": (NOW - timedelta(minutes=1)).isoformat(),
+        "valid_until": (NOW + timedelta(minutes=30)).isoformat(),
+        "symbol": "MES1!",
+        "decision": "SHORT",
+        "confidence": 0.8,
+        "analysis_summary": ["stateful short multi-bar lifecycle"],
+        "position_action": {
+            "quantity": 3,
+            "target_exit_quantity": 1,
+            "protective_stop": {"price": "6005.00"},
+            "take_profit": {"price": "5995.00"},
+        },
+    }
+    entry = ExecutionResult(
+        event_id=EVENT_ID,
+        plan_id=EVENT_ID,
+        plan_hash=canonical_plan_hash(plan),
+        status="OPEN",
+        reason_code="PAPER_ENTRY_FILLED_POSITION_OPEN",
+        terminal=False,
+        receipts=(),
+        position=PaperPositionRecord(
+            "paper-position:sequence-short",
+            EVENT_ID,
+            EVENT_ID,
+            "paper-order:sequence-short",
+            "paper-fill:sequence-short",
+            "MES1!",
+            "SHORT",
+            3,
+            Decimal("6000.00"),
+            NOW,
+            "OPEN",
+        ),
+    )
+    target_bar = (
+        Bar(open=Decimal("5999"), high=Decimal("6000"), low=Decimal("5994"), close=Decimal("5996")),
+        NOW + timedelta(minutes=5),
+    )
+    stop_bar = (
+        Bar(open=Decimal("6002"), high=Decimal("6006"), low=Decimal("6000"), close=Decimal("6004")),
+        NOW + timedelta(minutes=10),
+    )
+    relationship = build_paper_bracket(parent_order_id="paper-order:sequence-short", quantity=3)
+
+    partial = advance_open_position_through_bars(plan, entry, [target_bar])
+    result = advance_open_position_through_bars(plan, partial, [stop_bar])
+
+    assert partial.terminal is False
+    assert partial.status == "OPEN"
+    assert partial.position is not None and partial.position.quantity == 2
+    assert partial.order is not None and partial.order.order_id == relationship.target_order_id
+    assert partial.trade is not None and partial.trade.side == "LONG"
+    assert (partial.trade.quantity, partial.trade.price) == (1, Decimal("5995.00"))
+
+    assert result.terminal is True
+    assert result.status == "CLOSED"
+    assert result.reason_code == "STOP_FILLED"
+    assert result.position is not None and result.position.quantity == 0
+    assert result.order is not None and result.order.order_id == relationship.stop_order_id
+    assert result.fill is not None and result.fill.quantity == 2
+    assert [(trade.side, trade.quantity, trade.price) for trade in result.exit_trades] == [
+        ("LONG", 1, Decimal("5995.00")),
+        ("LONG", 2, Decimal("6005.00")),
+    ]
+    assert len({trade.trade_id for trade in result.exit_trades}) == 2
