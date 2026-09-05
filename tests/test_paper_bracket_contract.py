@@ -1,6 +1,11 @@
 import pytest
 
-from trading_core.paper_bracket import PaperBracketRelationship, apply_oco_fill, build_paper_bracket
+from trading_core.paper_bracket import (
+    PaperBracketRelationship,
+    apply_oco_fill,
+    build_paper_bracket,
+    cancel_paper_bracket,
+)
 
 
 def test_public_package_exports_bracket_contract():
@@ -8,11 +13,13 @@ def test_public_package_exports_bracket_contract():
         PaperBracketRelationship as ExportedRelationship,
         apply_oco_fill as exported_apply_oco_fill,
         build_paper_bracket as exported_build_paper_bracket,
+        cancel_paper_bracket as exported_cancel_paper_bracket,
     )
 
     assert ExportedRelationship is PaperBracketRelationship
     assert exported_apply_oco_fill is apply_oco_fill
     assert exported_build_paper_bracket is build_paper_bracket
+    assert exported_cancel_paper_bracket is cancel_paper_bracket
 
 
 def test_bracket_relationship_has_deterministic_parent_sibling_and_oco_identity():
@@ -155,3 +162,41 @@ def test_full_stop_fill_closes_bracket_and_cancels_target_sibling():
     assert updated.remaining_quantity == 0
     assert updated.cancelled_order_ids == (bracket.target_order_id,)
     assert updated.status == "CLOSED"
+
+
+def test_external_terminal_close_cancels_both_active_oco_children():
+    bracket = build_paper_bracket(parent_order_id="paper-order:entry-123", quantity=2)
+
+    updated = cancel_paper_bracket(bracket)
+
+    assert updated.remaining_quantity == 0
+    assert updated.active_stop_quantity == 0
+    assert updated.active_target_quantity == 0
+    assert updated.cancelled_order_ids == (bracket.stop_order_id, bracket.target_order_id)
+    assert updated.filled_order_ids == ()
+    assert updated.status == "CLOSED"
+    assert PaperBracketRelationship.from_record(updated.to_record()) == updated
+
+
+def test_external_terminal_close_preserves_filled_target_and_cancels_only_remaining_stop():
+    bracket = build_paper_bracket(
+        parent_order_id="paper-order:entry-123",
+        quantity=2,
+        target_quantity=1,
+    )
+    bracket = apply_oco_fill(bracket, filled_order_id=bracket.target_order_id, filled_quantity=1)
+
+    updated = cancel_paper_bracket(bracket)
+
+    assert updated.remaining_quantity == 0
+    assert updated.cancelled_order_ids == (bracket.stop_order_id,)
+    assert updated.filled_order_ids == (bracket.target_order_id,)
+    assert updated.status == "CLOSED"
+    assert PaperBracketRelationship.from_record(updated.to_record()) == updated
+
+
+def test_external_terminal_close_is_idempotent_for_closed_bracket():
+    bracket = build_paper_bracket(parent_order_id="paper-order:entry-123", quantity=1)
+    closed = apply_oco_fill(bracket, filled_order_id=bracket.stop_order_id, filled_quantity=1)
+
+    assert cancel_paper_bracket(closed) == closed
