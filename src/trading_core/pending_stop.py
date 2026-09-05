@@ -8,13 +8,13 @@ from .paper_lifecycle import Bar
 
 
 def process_pending_stop(self, order: PaperOrder, intent, *, bar: Bar, occurred_at):
-    """Resolve one pending LONG stop against a canonical closed OHLC bar."""
+    """Resolve one pending LONG or SHORT stop against a canonical closed OHLC bar."""
     if order.order_type != "STOP" or order.status != "PENDING" or order.stop_price is None:
         raise ValueError("order must be a pending STOP")
     if order.symbol != intent.symbol or order.side != intent.side or order.quantity != intent.quantity:
         raise ValueError("pending order and intent do not match")
-    if order.side != "LONG":
-        raise ValueError("pending STOP side is not yet supported")
+    if order.side not in {"LONG", "SHORT"}:
+        raise ValueError("pending STOP side is not supported")
     if not isinstance(bar, Bar):
         raise ValueError("bar must be a canonical Bar")
     _aware(occurred_at, "occurred_at")
@@ -27,10 +27,11 @@ def process_pending_stop(self, order: PaperOrder, intent, *, bar: Bar, occurred_
         existing = filled_stops.get(order.order_id)
         if existing is not None:
             return existing, None
-        if bar.high < order.stop_price:
+        crossed = bar.high >= order.stop_price if order.side == "LONG" else bar.low <= order.stop_price
+        if not crossed:
             return order, None
 
-        fill_price = max(order.stop_price, bar.open)
+        fill_price = max(order.stop_price, bar.open) if order.side == "LONG" else min(order.stop_price, bar.open)
         slippage_points = fill_price - order.stop_price
         filled = PaperOrder(
             order_id=order.order_id,
