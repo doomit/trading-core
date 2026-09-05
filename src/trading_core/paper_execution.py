@@ -211,6 +211,7 @@ class ExecutionResult:
     fill: PaperFill | None = None
     position: PaperPositionRecord | None = None
     trade: PaperTrade | None = None
+    exit_trades: tuple[PaperTrade, ...] = ()
 
 
 class PaperBroker(Protocol):

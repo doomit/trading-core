@@ -118,4 +118,5 @@ def flatten_open_position_at_session_close(
         fill,
         closed_position,
         trade,
+        entry_result.exit_trades + (trade,),
     )

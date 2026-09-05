@@ -121,3 +121,13 @@ def test_later_stop_fill_uses_same_bracket_stop_child_order_identity():
 
     assert result.order is not None
     assert result.order.order_id == relationship.stop_order_id
+
+
+def test_terminal_result_preserves_all_realized_exit_trades_for_accounting_projection():
+    result = _partial_then_stop_result()
+
+    assert [(trade.quantity, trade.price) for trade in result.exit_trades] == [
+        (1, Decimal("6005.00")),
+        (2, Decimal("5995.00")),
+    ]
+    assert len({trade.trade_id for trade in result.exit_trades}) == 2
