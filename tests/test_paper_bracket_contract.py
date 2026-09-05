@@ -111,6 +111,30 @@ def test_partial_target_fill_keeps_remaining_stop_protection_active():
     assert updated.status == "ACTIVE"
 
 
+def test_one_shot_partial_target_becomes_inactive_while_stop_remains_active_after_round_trip():
+    bracket = build_paper_bracket(
+        parent_order_id="paper-order:entry-123",
+        quantity=2,
+        target_quantity=1,
+    )
+
+    updated = apply_oco_fill(bracket, filled_order_id=bracket.target_order_id, filled_quantity=1)
+
+    assert updated.remaining_quantity == 1
+    assert updated.active_stop_quantity == 1
+    assert updated.active_target_quantity == 0
+    assert updated.cancelled_order_ids == ()
+    assert updated.filled_order_ids == (bracket.target_order_id,)
+    assert updated.status == "ACTIVE"
+
+    restored = PaperBracketRelationship.from_record(updated.to_record())
+    assert restored == updated
+    assert restored.active_stop_quantity == 1
+    assert restored.active_target_quantity == 0
+    assert restored.cancelled_order_ids == ()
+    assert restored.filled_order_ids == (bracket.target_order_id,)
+
+
 def test_full_target_fill_closes_bracket_and_cancels_stop_sibling():
     bracket = build_paper_bracket(parent_order_id="paper-order:entry-123", quantity=2)
 
