@@ -6,6 +6,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
+from .paper_bracket import build_paper_bracket
 from .paper_execution import (
     ROUND_TURN_COMMISSION_USD,
     ExecutionResult,
@@ -111,7 +112,15 @@ def close_open_position(
     identity = hashlib.sha256(
         f"{event_id}|{plan_id}|{plan_hash}|{position_record.position_id}|{resolution.reason_code}|{resolution.exit_price}".encode("utf-8")
     ).hexdigest()
-    exit_order_id = f"paper-exit-order:{identity[:32]}"
+    bracket = build_paper_bracket(
+        parent_order_id=position_record.order_id,
+        quantity=position_record.quantity,
+    )
+    exit_order_id = (
+        bracket.target_order_id
+        if resolution.reason_code in {"TARGET_FILLED", "TARGET_PARTIAL_FILLED"}
+        else bracket.stop_order_id
+    )
     exit_fill_id = f"paper-exit-fill:{identity[:32]}"
     exit_side = "SHORT" if position_record.side == "LONG" else "LONG"
     exit_order = PaperOrder(
