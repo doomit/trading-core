@@ -242,4 +242,28 @@ def apply_oco_fill(
     )
 
 
-__all__ = ["PaperBracketRelationship", "apply_oco_fill", "build_paper_bracket"]
+def cancel_paper_bracket(relationship: PaperBracketRelationship) -> PaperBracketRelationship:
+    """Close an OCO bracket after an external terminal exit, cancelling only active children."""
+
+    if not isinstance(relationship, PaperBracketRelationship):
+        raise TypeError("relationship must be PaperBracketRelationship")
+    if relationship.status == "CLOSED":
+        return relationship
+    cancelled = relationship.cancelled_order_ids
+    for order_id in (relationship.stop_order_id, relationship.target_order_id):
+        if order_id not in relationship.filled_order_ids and order_id not in cancelled:
+            cancelled = (*cancelled, order_id)
+    return replace(
+        relationship,
+        remaining_quantity=0,
+        cancelled_order_ids=cancelled,
+        status="CLOSED",
+    )
+
+
+__all__ = [
+    "PaperBracketRelationship",
+    "apply_oco_fill",
+    "build_paper_bracket",
+    "cancel_paper_bracket",
+]

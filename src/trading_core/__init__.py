@@ -3,7 +3,12 @@
 from . import paper_execution as paper_execution
 from . import paper_exit as paper_exit
 from . import risk_admission as risk_admission
-from .paper_bracket import PaperBracketRelationship, apply_oco_fill, build_paper_bracket
+from .paper_bracket import (
+    PaperBracketRelationship,
+    apply_oco_fill,
+    build_paper_bracket,
+    cancel_paper_bracket,
+)
 from .paper_exit import close_open_position
 from .paper_session_flatten import flatten_open_position_at_session_close
 from .pending_cancel import cancel_pending
@@ -28,6 +33,7 @@ __all__ = [
     "PaperBracketRelationship",
     "apply_oco_fill",
     "build_paper_bracket",
+    "cancel_paper_bracket",
     "close_open_position",
     "flatten_open_position_at_session_close",
     "paper_execution",
