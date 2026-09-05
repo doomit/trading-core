@@ -65,6 +65,8 @@ class ConfigurableRiskGateway:
         if feed_age > Decimal(cfg.risk.max_feed_age_seconds):
             return self._reject("STALE_FEED")
 
+        if account.equity_usd <= account.starting_equity_usd - cfg.risk.max_daily_realized_loss_usd:
+            return self._reject("ACCOUNT_LOSS_LIMIT_REACHED")
         if account.daily_realized_pnl_usd <= -cfg.risk.max_daily_realized_loss_usd:
             return self._reject("DAILY_LOSS_LIMIT_REACHED")
         if account.consecutive_failures >= cfg.risk.max_consecutive_losses:
