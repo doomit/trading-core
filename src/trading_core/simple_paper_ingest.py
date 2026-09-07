@@ -32,9 +32,12 @@ def persist_one_minute_window(
 ) -> dict:
     """Persist one TradingView one-minute window directly to authoritative raw storage.
 
+    Returns both write counts and the effective persisted entities chosen by the
+    repository. The latter is important for immutable/conflict semantics: callers
+    must mirror what the DB accepted, never a conflicting incoming value.
+
     This intentionally performs no queue publication, Canonical5m build, BAR_READY
-    publication, status projection, or downstream orchestration. Duplicate raw bars
-    are delegated to the repository's idempotent upsert contract.
+    publication, status projection, or downstream orchestration.
     """
     error, details = validate_payload(payload)
     if error:
@@ -46,6 +49,7 @@ def persist_one_minute_window(
         raise ValueError("Simple Paper ingest accepts one-minute bars only")
 
     counts = {"inserted": 0, "duplicates": 0, "corrected": 0, "conflicts": 0}
+    effective_bars: list[dict] = []
     for bar in payload["bars"]:
         incoming = raw_entity(
             payload=payload,
@@ -63,40 +67,47 @@ def persist_one_minute_window(
         action = outcome.get("action")
         if action not in counts:
             raise ValueError(f"unknown raw write action: {action}")
+        effective = outcome.get("entity")
+        if not isinstance(effective, dict):
+            raise ValueError("raw write outcome must include the effective entity")
         counts[action] += 1
+        effective_bars.append(dict(effective))
 
     counts["payload_bars"] = len(payload["bars"])
-    return counts
+    effective_bars.sort(key=lambda row: int(row["BarStart"]))
+    return {"counts": counts, "effective_bars": effective_bars}
+
+
+def _market_bar_from_entity(entity: dict) -> dict:
+    return {
+        "start": _iso(int(entity["BarStart"])),
+        "end": _iso(int(entity["BarCloseTime"])),
+        "open": float(entity["Open"]),
+        "high": float(entity["High"]),
+        "low": float(entity["Low"]),
+        "close": float(entity["Close"]),
+        "volume": float(entity["Volume"]),
+    }
 
 
 def build_market_snapshot(
     *,
-    payload: dict,
+    symbol: str,
+    effective_bars: list[dict],
     db_committed_at: int,
     github_mirrored_at: int,
 ) -> dict:
-    """Build the bounded GitHub Brain-facing snapshot from a validated 1m window."""
-    error, details = validate_payload(payload)
-    if error:
-        raise ValueError(f"payload validation failed: {error} {details}")
-    if str(payload["timeframe"]) != "1":
-        raise ValueError("Simple Paper market snapshot accepts one-minute bars only")
+    """Build the Brain-facing snapshot only from authoritative effective rows."""
+    if symbol not in {"MES", "MNQ"}:
+        raise ValueError("Simple Paper market snapshot supports MES/MNQ only")
+    if not effective_bars:
+        raise ValueError("effective_bars must not be empty")
 
-    bars = [
-        {
-            "start": _iso(int(bar["t"])),
-            "end": _iso(int(bar["tc"])),
-            "open": float(bar["o"]),
-            "high": float(bar["h"]),
-            "low": float(bar["l"]),
-            "close": float(bar["c"]),
-            "volume": float(bar["v"]),
-        }
-        for bar in payload["bars"]
-    ]
+    rows = sorted(effective_bars, key=lambda row: int(row["BarStart"]))
+    bars = [_market_bar_from_entity(row) for row in rows]
     return {
         "schema": "market_snapshot_v1",
-        "symbol": str(payload["root"]),
+        "symbol": symbol,
         "updated_at": _iso(github_mirrored_at),
         "latest_bar_end": bars[-1]["end"],
         "db_committed_at": _iso(db_committed_at),
@@ -107,7 +118,8 @@ def build_market_snapshot(
 
 def build_ingest_log(
     *,
-    payload: dict,
+    symbol: str,
+    effective_bars: list[dict],
     request_id: str,
     received_at: int,
     db_committed_at: int,
@@ -117,15 +129,17 @@ def build_ingest_log(
     logged_at: int,
     error: str | None,
 ) -> dict:
-    latest_bar_end_ms = int(payload["bars"][-1]["tc"])
+    if not effective_bars:
+        raise ValueError("effective_bars must not be empty")
+    latest_bar_end_ms = max(int(row["BarCloseTime"]) for row in effective_bars)
     github_latency = None
     if github_mirrored_at is not None:
         github_latency = max(0, int(github_mirrored_at) - int(db_committed_at))
 
     return {
         "schema": "ingest_log_v1",
-        "log_id": f"ingest-{payload['root'].lower()}-{request_id}",
-        "symbol": str(payload["root"]),
+        "log_id": f"ingest-{symbol.lower()}-{request_id}",
+        "symbol": symbol,
         "request_id": request_id,
         "logged_at": _iso(logged_at),
         "latest_bar_end": _iso(latest_bar_end_ms),
@@ -133,8 +147,11 @@ def build_ingest_log(
         "db_committed_at": _iso(db_committed_at),
         "github_status": github_status,
         "github_mirrored_at": _iso(github_mirrored_at) if github_mirrored_at is not None else None,
-        "bars_received": int(db_result.get("payload_bars", len(payload["bars"]))),
+        "bars_received": int(db_result.get("payload_bars", len(effective_bars))),
         "bars_inserted": int(db_result.get("inserted", 0)),
+        # v1 contract has no explicit duplicate count. `bars_updated` means rows
+        # already present/effectively retained plus corrections, so the dashboard
+        # can still reconcile bars_received = inserted + updated + conflicts.
         "bars_updated": int(db_result.get("duplicates", 0)) + int(db_result.get("corrected", 0)),
         "market_to_webhook_latency_ms": max(0, int(received_at) - latest_bar_end_ms),
         "db_write_latency_ms": max(0, int(db_committed_at) - int(received_at)),
@@ -150,6 +167,7 @@ def complete_ingest_after_db(
     received_at: int,
     db_committed_at: int,
     db_result: dict,
+    effective_bars: list[dict],
     mirror_market: Callable[[dict], None],
     mirror_timestamp: int,
     logged_at: int,
@@ -160,8 +178,10 @@ def complete_ingest_after_db(
     window. Therefore mirror failure is captured as data and never changes the
     returned ingest acceptance result.
     """
+    symbol = str(payload["root"])
     snapshot = build_market_snapshot(
-        payload=payload,
+        symbol=symbol,
+        effective_bars=effective_bars,
         db_committed_at=db_committed_at,
         github_mirrored_at=mirror_timestamp,
     )
@@ -176,7 +196,8 @@ def complete_ingest_after_db(
 
     effective_mirror_time = mirror_timestamp if github_status == "SUCCESS" else None
     ingest_log = build_ingest_log(
-        payload=payload,
+        symbol=symbol,
+        effective_bars=effective_bars,
         request_id=request_id,
         received_at=received_at,
         db_committed_at=db_committed_at,
