@@ -1,0 +1,15 @@
+{
+  "schema": "execution_rules_v1",
+  "updated_at": "2026-09-07T16:00:00Z",
+  "mode": "PAPER",
+  "symbols": ["MES", "MNQ"],
+  "max_contracts_per_symbol": 6,
+  "one_active_position_per_symbol": true,
+  "paper_initial_cash_usd": 10000000,
+  "eod": {
+    "timezone": "America/Los_Angeles",
+    "force_close_time": "15:00:00"
+  },
+  "stale_feed_forced_stop_minutes": 15,
+  "same_bar_exit_policy": "ADVERSE_FIRST"
+}
