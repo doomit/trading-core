@@ -52,6 +52,10 @@ class FakeRawRepo:
         return {"action": "conflicts", "entity": dict(current)}
 
 
+def _counts(result: dict) -> dict:
+    return result["counts"]
+
+
 def test_same_twenty_bar_window_is_idempotent_without_queue_or_canonical_dependency():
     payload = _payload()
     repo = FakeRawRepo()
@@ -72,25 +76,79 @@ def test_same_twenty_bar_window_is_idempotent_without_queue_or_canonical_depende
         received_at=1788800462000,
     )
 
-    assert first == {
+    assert _counts(first) == {
         "inserted": 20,
         "duplicates": 0,
         "corrected": 0,
         "conflicts": 0,
         "payload_bars": 20,
     }
-    assert second == {
+    assert _counts(second) == {
         "inserted": 0,
         "duplicates": 20,
         "corrected": 0,
         "conflicts": 0,
         "payload_bars": 20,
     }
+    assert len(first["effective_bars"]) == 20
+    assert len(second["effective_bars"]) == 20
     assert len(repo.rows) == 20
+
+
+def test_github_snapshot_uses_authoritative_effective_rows_when_incoming_bar_conflicts():
+    payload = _payload()
+    repo = FakeRawRepo()
+    profile = profile_for_live(received_at=1788800402000)
+    persist_one_minute_window(
+        payload=payload,
+        profile=profile,
+        repo=repo,
+        request_id="req-original",
+        received_at=1788800402000,
+    )
+
+    conflicting = _payload()
+    conflicting["bars"][-1] = dict(conflicting["bars"][-1])
+    conflicting["bars"][-1]["c"] = 6520.25
+    conflicting["bars"][-1]["h"] = 6521.0
+    result = persist_one_minute_window(
+        payload=conflicting,
+        profile=profile,
+        repo=repo,
+        request_id="req-conflict",
+        received_at=1788800462000,
+    )
+
+    assert result["counts"]["conflicts"] == 1
+    captured = []
+    completed = complete_ingest_after_db(
+        payload=conflicting,
+        request_id="req-conflict",
+        received_at=1788800462000,
+        db_committed_at=1788800462090,
+        db_result=result["counts"],
+        effective_bars=result["effective_bars"],
+        mirror_market=captured.append,
+        mirror_timestamp=1788800462900,
+        logged_at=1788800463000,
+    )
+
+    assert completed["accepted"] is True
+    assert captured[0]["bars"][-1]["close"] == 6519.5
+    assert captured[0]["bars"][-1]["close"] != conflicting["bars"][-1]["c"]
 
 
 def test_db_success_remains_success_when_github_market_mirror_fails():
     payload = _payload()
+    repo = FakeRawRepo()
+    profile = profile_for_live(received_at=1788800402000)
+    persisted = persist_one_minute_window(
+        payload=payload,
+        profile=profile,
+        repo=repo,
+        request_id="req-mirror-fail",
+        received_at=1788800402000,
+    )
 
     def broken_mirror(_snapshot):
         raise RuntimeError("github unavailable")
@@ -100,13 +158,8 @@ def test_db_success_remains_success_when_github_market_mirror_fails():
         request_id="req-mirror-fail",
         received_at=1788800402000,
         db_committed_at=1788800402090,
-        db_result={
-            "inserted": 1,
-            "duplicates": 19,
-            "corrected": 0,
-            "conflicts": 0,
-            "payload_bars": 20,
-        },
+        db_result=persisted["counts"],
+        effective_bars=persisted["effective_bars"],
         mirror_market=broken_mirror,
         mirror_timestamp=1788800402900,
         logged_at=1788800403000,
@@ -123,10 +176,16 @@ def test_db_success_remains_success_when_github_market_mirror_fails():
 
 def test_ingest_snapshot_and_log_expose_exact_market_db_and_github_latency():
     payload = _payload()
+    repo = FakeRawRepo()
+    profile = profile_for_live(received_at=1788800402000)
+    persisted = persist_one_minute_window(
+        payload=payload,
+        profile=profile,
+        repo=repo,
+        request_id="req-ok",
+        received_at=1788800402000,
+    )
     captured = []
-
-    def mirror(snapshot):
-        captured.append(snapshot)
 
     result = complete_ingest_after_db(
         payload=payload,
@@ -134,13 +193,12 @@ def test_ingest_snapshot_and_log_expose_exact_market_db_and_github_latency():
         received_at=1788800402000,
         db_committed_at=1788800402090,
         db_result={
+            **persisted["counts"],
             "inserted": 1,
             "duplicates": 19,
-            "corrected": 0,
-            "conflicts": 0,
-            "payload_bars": 20,
         },
-        mirror_market=mirror,
+        effective_bars=persisted["effective_bars"],
+        mirror_market=captured.append,
         mirror_timestamp=1788800402900,
         logged_at=1788800403000,
     )
