@@ -18,21 +18,32 @@
     "active_plan_id": {"type": ["string", "null"]},
     "active_plan_generated_at": {"type": ["string", "null"], "format": "date-time"},
     "action_valid_until": {"type": ["string", "null"], "format": "date-time"},
-    "pending_add": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/adjustment"}]},
-    "pending_reduce": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/adjustment"}]},
+    "pending_add": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/order_instruction"}]},
+    "pending_reduce": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/order_instruction"}]},
     "opened_at": {"type": ["string", "null"], "format": "date-time"},
     "updated_at": {"type": "string", "format": "date-time"},
     "closed_at": {"type": ["string", "null"], "format": "date-time"},
     "last_action_id": {"type": ["string", "null"]}
   },
   "$defs": {
-    "adjustment": {
+    "order_instruction": {
       "type": "object",
-      "required": ["trigger_price", "qty"],
+      "required": ["order_type", "trigger_price", "qty"],
       "properties": {
-        "trigger_price": {"type": "number"},
+        "order_type": {"enum": ["MARKET", "LIMIT", "STOP"]},
+        "trigger_price": {"type": ["number", "null"]},
         "qty": {"type": "integer", "minimum": 1, "maximum": 6}
       },
+      "allOf": [
+        {
+          "if": {"properties": {"order_type": {"const": "MARKET"}}},
+          "then": {"properties": {"trigger_price": {"type": "null"}}}
+        },
+        {
+          "if": {"properties": {"order_type": {"enum": ["LIMIT", "STOP"]}}},
+          "then": {"properties": {"trigger_price": {"type": "number"}}}
+        }
+      ],
       "additionalProperties": false
     }
   },
