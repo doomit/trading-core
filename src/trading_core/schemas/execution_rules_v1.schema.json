@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "execution_rules_v1",
+  "title": "Execution Rules v1",
+  "type": "object",
+  "required": ["schema", "updated_at", "mode", "symbols", "max_contracts_per_symbol", "one_active_position_per_symbol", "paper_initial_cash_usd", "eod", "stale_feed_forced_stop_minutes", "same_bar_exit_policy"],
+  "properties": {
+    "schema": {"const": "execution_rules_v1"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "mode": {"const": "PAPER"},
+    "symbols": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": {"enum": ["MES", "MNQ"]},
+      "allOf": [
+        {"contains": {"const": "MES"}},
+        {"contains": {"const": "MNQ"}}
+      ]
+    },
+    "max_contracts_per_symbol": {"type": "integer", "minimum": 1, "maximum": 6},
+    "one_active_position_per_symbol": {"const": true},
+    "paper_initial_cash_usd": {"const": 10000000},
+    "eod": {
+      "type": "object",
+      "required": ["timezone", "force_close_time"],
+      "properties": {
+        "timezone": {"const": "America/Los_Angeles"},
+        "force_close_time": {"const": "15:00:00"}
+      },
+      "additionalProperties": false
+    },
+    "stale_feed_forced_stop_minutes": {"const": 15},
+    "same_bar_exit_policy": {"const": "ADVERSE_FIRST"}
+  },
+  "additionalProperties": false
+}
