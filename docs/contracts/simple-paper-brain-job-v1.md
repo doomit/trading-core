@@ -12,15 +12,36 @@ Define the stable contract for the scheduled ChatGPT Brain job used by Simple Pa
 - Do not create or use Event Brain in v1.
 - PAPER only.
 
+## Canonical GitHub locations
+
+The paths below are part of the v1 contract. Consumers must use exact path lookup; they must not scan historical files to discover “latest”.
+
+Runtime data repository: `doomit/trading-runtime`, branch `gpt-runtime`.
+
+For `SYMBOL` = `MES` or `MNQ`:
+
+- Market snapshot: `runtime/simple-paper/market/SYMBOL/current.json`
+- Current position: `runtime/simple-paper/position/SYMBOL/current.json`
+- Latest Brain plan: `runtime/simple-paper/plan/SYMBOL/current.json`
+- Immutable Brain run evidence: `runtime/simple-paper/brain-runs/<run_id>.json`
+
+Stable public control repository: `doomit/trading-core`, branch `main` after this contract PR merges.
+
+- Execution rules: `config/simple-paper/execution-rules-v1.json`
+- Strategy prompt: `docs/strategy/simple-paper-v1.md`
+- Schemas: `src/trading_core/schemas/*.schema.json`
+
+Azure remains authoritative for market bars and Position. GitHub market and position files are best-effort mirrors for Brain. A stale or missing GitHub mirror must make Brain less actionable, never make Azure forget durable state.
+
 ## Inputs
 
-For each symbol `MES` and `MNQ`, read the latest GitHub-owned values below.
+For each symbol `MES` and `MNQ`, read the exact GitHub locations above.
 
 1. **Market snapshot** — must validate as `market_snapshot_v1`.
 2. **Current position** — must validate as `position_state_v1`.
 3. **Execution rules** — must validate as `execution_rules_v1`.
 4. **Previous/latest plan** — if present, must validate as `trading_plan_v2` before it is used as context.
-5. **Strategy prompt** — a separately versioned Markdown document describing how to analyze price action and choose a plan.
+5. **Strategy prompt** — the separately versioned Markdown document describing how to analyze price action and choose a plan.
 
 Every JSON input must contain its own timestamp(s). The job must report the exact latest one-minute `analysis_bar_end` it used.
 
@@ -44,7 +65,7 @@ Never guess or synthesize a position id/version.
 
 ## Plan output
 
-Write exactly one latest plan for MES and one latest plan for MNQ. Each output must validate as `trading_plan_v2` before publication.
+Write exactly one latest plan to each exact `runtime/simple-paper/plan/SYMBOL/current.json` path. Each output must validate as `trading_plan_v2` before publication.
 
 Required plan semantics:
 
@@ -63,13 +84,13 @@ The Brain proposes actions. Azure remains responsible for matching the candidate
 
 The stable scheduled-job prompt should say, in substance:
 
-1. Read and validate the five input classes above.
+1. Read and validate the five input classes above from their exact paths.
 2. Analyze MES and MNQ according to the current strategy prompt.
 3. Generate one contract-valid `trading_plan_v2` per symbol bound to the exact observed position.
 4. Validate output before write.
-5. Write a concise Brain run log with input timestamps, output timestamps, and blockers.
+5. Write a concise immutable Brain run log with input timestamps, output timestamps, and blockers.
 
-The stable job prompt must not embed detailed strategy rules. Strategy rules belong only in the strategy prompt document so a strategy change does not require changing the scheduler task.
+The stable job prompt must not embed detailed strategy rules. Strategy rules belong only in `docs/strategy/simple-paper-v1.md` so a strategy change does not require changing the scheduler task.
 
 ## Failure behavior
 
@@ -81,7 +102,7 @@ The stable job prompt must not embed detailed strategy rules. Strategy rules bel
 
 ## Observability
 
-For every symbol attempted, the Brain run log should expose at least:
+For every symbol attempted, the Brain run evidence should expose at least:
 
 - scheduled run time;
 - market snapshot `updated_at` and `latest_bar_end`;
