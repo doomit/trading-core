@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a PAPER-only MES/MNQ runtime with explicit contracts, 1-minute ingest, one deterministic 15-second execution loop, and one scheduled 15-minute Brain plan generator.
+**Goal:** Build a PAPER-only MES/MNQ runtime with explicit contracts, authoritative one-minute ingest, one deterministic 15-second execution loop, and one scheduled 15-minute Brain plan generator.
 
-**Architecture:** TradingView writes authoritative one-minute bars to Azure and best-effort mirrors a bounded market snapshot to GitHub. A single reentrant Azure execution cycle advances position state every 15 seconds. A scheduled Brain job reads GitHub market/position/rules/strategy inputs every 15 minutes and writes an executable `trading_plan_v2`; Event Brain and distributed queue/state-machine orchestration stay disabled.
+**Architecture:** TradingView writes authoritative one-minute bars to Azure and best-effort mirrors bounded market data to GitHub. Azure owns durable Position and mirrors it to GitHub only for Brain input. A single reentrant execution cycle advances paper state every 15 seconds. Scheduled Brain reads exact GitHub paths every 15 minutes and writes one executable `trading_plan_v2` per symbol. Event Brain and distributed queue/state-machine orchestration remain disabled.
 
 **Tech Stack:** Python 3.12, pytest 8, jsonschema 4, Azure Functions, Azure durable storage adapters, GitHub contents API, ChatGPT scheduled tasks.
 
@@ -15,16 +15,18 @@
 - PAPER only; no live-money authorization or live broker integration.
 - Symbols are MES and MNQ only for v1.
 - At most one OPEN position per symbol.
-- Position quantity is an integer from 0 through 6.
-- Accepted OPEN position protection requires both stop-loss and take-profit.
+- Maximum effective quantity per symbol is 6 micros.
+- An OPEN position always has durable stop-loss and take-profit.
 - Event Brain remains disabled for v1.
 - Runtime correctness does not depend on GitHub mirror freshness, dashboard projection state, hidden ChatGPT memory, BAR_READY, or historical event scans.
-- All component boundaries are versioned contracts; unknown executable keywords fail validation.
-- Each task is sequential. Do not start a later task until the prior task is reviewed and green.
+- All current-state lookups use exact canonical paths; no list/filter/batch resolver is allowed.
+- All component boundaries are versioned contracts; unknown or ambiguous executable keywords fail validation.
+- Every runtime feature follows TDD: failing behavior test first, verified failure, minimal implementation, verified green.
+- Work is sequential. Do not start a later task until the previous task is reviewed and green.
 
 ---
 
-### Task 1: Freeze public contracts and boundary tests
+### Task 1: Freeze contracts, strategy/control inputs, and boundary semantics
 
 **Files:**
 - Create: `src/trading_core/schemas/market_snapshot_v1.schema.json`
@@ -34,93 +36,141 @@
 - Create: `src/trading_core/schemas/ingest_log_v1.schema.json`
 - Create: `src/trading_core/schemas/plan_observation_log_v1.schema.json`
 - Create: `src/trading_core/schemas/execution_cycle_log_v1.schema.json`
-- Create: `tests/test_simple_paper_contracts.py`
+- Create: `src/trading_core/simple_paper_contracts.py`
+- Create: `config/simple-paper/execution-rules-v1.json`
 - Create: `docs/contracts/simple-paper-brain-job-v1.md`
+- Create: `docs/strategy/simple-paper-v1.md`
+- Create: `tests/test_simple_paper_contracts.py`
+- Create: `tests/test_simple_paper_contract_semantics.py`
+- Create: `tests/test_simple_paper_execution_rules_file.py`
+- Create: `tests/test_simple_paper_log_edge_cases.py`
+- Create: `tests/test_simple_paper_entry_contract.py`
 
 **Interfaces:**
-- Consumes: user-approved Simple Paper Runtime v1 design.
-- Produces: the only allowed JSON shapes for Azure/GitHub/Brain boundaries used by Tasks 2–6.
+- Consumes: the approved Simple Paper Runtime v1 design.
+- Produces: the only allowed JSON shapes and exact-path/position-binding semantics used by every later task.
 
-- [ ] **Step 1: Write failing contract tests** that load all seven new schemas and assert valid/invalid fixtures for FLAT/open position binding, position version, plan action expiry, max quantity 6, required protection, one optional add/reduce instruction, PAPER-only rules, timestamps, and log latency fields.
-- [ ] **Step 2: Open a draft PR and verify CI fails because the new schemas do not exist.** Expected failure is missing schema resource/file, not a syntax/import error.
-- [ ] **Step 3: Add the seven minimal JSON Schemas** required by the tests. Use `additionalProperties: false` on executable/state contracts unless a nested metadata object is intentionally free-form.
-- [ ] **Step 4: Add the scheduled Brain job contract document** defining exact GitHub inputs, exact output, 15-minute semantics, strategy-prompt separation, and fail-safe behavior.
-- [ ] **Step 5: Run PR CI and verify the new tests plus the existing suite pass.**
-- [ ] **Step 6: Review the diff for ambiguity and complexity.** Reject any executable field whose meaning cannot be implemented deterministically by Azure without a second resolver/state machine.
-- [ ] **Step 7: Mark the PR ready only after CI and review are clean.** Do not merge runtime code in this task.
+**Acceptance:**
+- All seven schemas validate representative good fixtures and reject ambiguous/unsafe fixtures.
+- `trading_plan_v2` binds exactly to FLAT or `position_id + position_version`.
+- MARKET entry carries no trigger price; LIMIT/STOP carry a numeric trigger price.
+- Effective quantity calculation includes optional add and cannot exceed 6.
+- Plan generation and pickup latency calculations are deterministic.
+- Canonical rules file validates and is PAPER-only.
+- Canonical GitHub market/position/plan paths are frozen in the Brain job contract.
+- GitHub mirror failure can be represented without undoing authoritative DB/Position success.
+- Existing v1 contracts remain untouched.
 
-### Task 2: Implement webhook ingest, latency log, and best-effort GitHub market mirror
+### Task 2: Simplify webhook ingest and GitHub market mirror
 
-**Files:**
-- Modify/create in `doomit/trading-live` only after Task 1 contracts merge.
-- Add focused tests in `doomit/trading-core` or the existing PR-friendly code-test repository for adapter-independent behavior before runtime changes.
+**Goal:** Make DB bar persistence the only correctness requirement of ingest; remove BAR_READY from the new path.
 
-**Interfaces:**
-- Consumes: `market_snapshot_v1`, `ingest_log_v1`.
-- Produces: authoritative DB bars; append-only ingest observation; GitHub `current` snapshot per symbol.
+**Consumes:** `market_snapshot_v1`, `ingest_log_v1`.
 
-- [ ] **Step 1: Write failing tests** proving successful DB commit is not rolled back by GitHub mirror failure; duplicate 20-bar webhook windows are idempotent; latest-bar/received/commit/mirror latency values are correct.
-- [ ] **Step 2: Verify RED.**
-- [ ] **Step 3: Implement minimal ingest/mirror behavior** without BAR_READY publication in the correctness path.
-- [ ] **Step 4: Verify GREEN and existing ingestion tests.**
-- [ ] **Step 5: Add one synthetic webhook acceptance test** proving DB state and log contract are correct when GitHub mirror is intentionally failed.
+**Produces:** authoritative one-minute DB bars, append-only ingest logs, and best-effort exact-path GitHub market snapshots.
 
-### Task 3: Implement durable Position state and paper execution semantics
+**Required tests before runtime code:**
+- duplicate 20-bar TradingView windows are idempotent;
+- DB success + GitHub mirror failure still returns successful ingest and records `github_status=FAILED`;
+- latest-bar receive/DB/mirror timestamps produce the expected latency values;
+- missing/late bars carried in the next 20-bar window repair DB history without generating duplicate work;
+- no `BAR_READY` publication is required for success.
 
-**Interfaces:**
-- Consumes: `position_state_v1`, `execution_rules_v1`, accepted `trading_plan_v2`, latest OHLCV.
-- Produces: monotonic Position versions and deterministic PAPER actions.
+**Runtime acceptance:** synthetic webhook proves DB + log contract + best-effort mirror; existing webhook format `tv_bars_v2` remains accepted.
 
-- [ ] **Step 1: Write failing tests** for one active position per symbol, OPEN/CLOSED lifecycle, protection copied from accepted plan, adverse-first same-bar stop/TP, one ADD and one REDUCE, quantity cap 6, stale-feed synthetic stop, no historical entry replay, and EOD force close.
-- [ ] **Step 2: Verify RED.**
-- [ ] **Step 3: Implement minimal deterministic paper position engine.**
-- [ ] **Step 4: Verify GREEN.**
-- [ ] **Step 5: Add idempotency tests** showing reprocessing the same plan/bar cannot duplicate an action or position.
+### Task 3: Implement durable Position and deterministic paper execution
+
+**Goal:** One durable Position per symbol is the executable truth; accepted plans become deterministic paper actions without a separate execution state machine.
+
+**Consumes:** `position_state_v1`, `execution_rules_v1`, accepted `trading_plan_v2`, latest OHLCV.
+
+**Produces:** monotonic Position versions, paper execution observations, and best-effort Position mirror to `runtime/simple-paper/position/SYMBOL/current.json`.
+
+**Required tests before runtime code:**
+- FLAT → OPEN with position id/version 0 and durable stop/TP;
+- one OPEN position per symbol;
+- accepted protection update increments `position_version`;
+- add/reduce are one-shot and effective qty never exceeds 6;
+- same-bar stop + take-profit uses `ADVERSE_FIRST`;
+- action expiry blocks old OPEN/ADD/REDUCE/EXIT while durable protection remains;
+- stale-feed >=15 minutes closes PAPER position synthetically at durable stop with `STALE_FEED_FORCED_STOP`;
+- recovered historical bars may apply protective exit but never historical entry;
+- 15:00 America/Los_Angeles EOD close is deterministic;
+- replaying the same plan/bar/action is idempotent;
+- durable Position success is not rolled back by Position-mirror failure.
 
 ### Task 4: Implement the single 15-second execution cycle
 
-**Interfaces:**
-- Consumes: latest candidate plan per symbol, durable Position, latest DB market, execution rules.
-- Produces: plan-observation logs, position actions/state, execution-cycle logs.
+**Goal:** Replace multiple runtime monitors/resolvers with one short-lived, reentrant state-advancing loop.
 
-- [ ] **Step 1: Write failing orchestration tests** for the exact order: EOD close; plan pull/observe; candidate validate/apply; market read; unified symbol execution; cycle summary.
-- [ ] **Step 2: Add failure-isolation tests** proving plan read/validation exceptions are logged and do not prevent the position-management attempt.
-- [ ] **Step 3: Verify RED.**
-- [ ] **Step 4: Implement one short-lived reentrant timer handler** with no Brain waiting and no per-stage queue/event chain.
-- [ ] **Step 5: Verify GREEN and run the full relevant suite.**
-- [ ] **Step 6: Add restart/reentry tests** proving durable state alone determines the next action.
+**Consumes:** exact latest plan path, durable Position, latest DB market, execution rules.
 
-### Task 5: Define and enable the scheduled 15-minute Brain job
+**Produces:** `plan_observation_log_v1`, Position actions/state, and `execution_cycle_log_v1`.
 
-**Interfaces:**
-- Consumes from GitHub: `market_snapshot_v1`, `position_state_v1`, `execution_rules_v1`, previous plan if present, and strategy prompt.
-- Produces: one `trading_plan_v2` for MES and one for MNQ per run.
+**Required execution order per symbol:**
+1. EOD close check. If it closes the symbol, log/persist/mirror and stop that symbol for this tick.
+2. Exact-path candidate plan pull and plan-observation log.
+3. Exact position/version + expiry validation; accept/apply once or ignore/log.
+4. Read latest market and enter one unified execution function: OPEN always manages existing position; FLAT may execute a valid OPEN instruction.
+5. Write cycle summary. There is no generic later “persist state” stage.
 
-- [ ] **Step 1: Create the strategy prompt file separately from the stable job contract.**
-- [ ] **Step 2: Add fixture-based output validation** requiring every generated plan to pass `trading_plan_v2` before publication.
-- [ ] **Step 3: Add the Hub task as urgent scheduled work every 15 minutes** with overdue work retaining higher priority.
-- [ ] **Step 4: Keep Event Brain disabled.**
-- [ ] **Step 5: Run several PAPER-only scheduled analyses and verify analysis-bar time, plan generation time, position binding, and pickup latency are observable.**
+**Failure-isolation tests before runtime code:**
+- GitHub plan read failure is logged and does not prevent OPEN position management;
+- malformed/expired/mismatched plan is ignored and previous durable protection continues;
+- DB market read failure still reaches safe stale/no-price handling rather than silently skipping the position branch;
+- repeated/concurrent-looking invocations converge by idempotency even though Timer normally avoids overlap;
+- restart with only durable state is sufficient to determine the next action.
+
+### Task 5: Enable the scheduled 15-minute Brain
+
+**Goal:** One stable scheduled job reads explicit GitHub inputs and strategy prompt, then emits contract-valid MES/MNQ plans.
+
+**Consumes exact paths:**
+- `doomit/trading-runtime@gpt-runtime:runtime/simple-paper/market/SYMBOL/current.json`
+- `doomit/trading-runtime@gpt-runtime:runtime/simple-paper/position/SYMBOL/current.json`
+- `doomit/trading-runtime@gpt-runtime:runtime/simple-paper/plan/SYMBOL/current.json` when present
+- `doomit/trading-core@main:config/simple-paper/execution-rules-v1.json`
+- `doomit/trading-core@main:docs/strategy/simple-paper-v1.md`
+
+**Produces:** one validated `trading_plan_v2` at the exact current plan path per symbol plus immutable Brain run evidence.
+
+**Acceptance:**
+- event-triggered Brain remains off;
+- strategy changes normally touch only `docs/strategy/simple-paper-v1.md`, not the stable task prompt;
+- plan publication is blocked on schema/semantic validation failure;
+- one symbol failure does not overwrite the other symbol's last valid plan;
+- `analysis_bar_end`, generated time, exact position binding, and later Azure pickup time make latency observable;
+- the Hub task is `urgent`; overdue work still outranks it.
 
 ### Task 6: Build log-driven watchdog/dashboard
 
-**Interfaces:**
-- Consumes: ingest, plan-observation, execution-cycle logs plus current Position/Plan.
-- Produces: read-only system status and HTML rendering.
+**Goal:** Render system health entirely from logs and durable current state, without creating another control-plane state machine.
 
-- [ ] **Step 1: Write failing projection tests** for feed age, GitHub mirror age, Brain generation latency, plan pickup latency, active position/plan, last execution action, and error state.
-- [ ] **Step 2: Verify RED.**
-- [ ] **Step 3: Implement a read-only dashboard projection.** It must never write trading state or block execution.
-- [ ] **Step 4: Verify GREEN and render the existing-style HTML view.**
+**Consumes:** ingest logs, plan-observation logs, execution-cycle logs, current Position, current Plan, Brain run evidence.
 
-### Task 7: Cut over and delete obsolete orchestration
+**Produces:** read-only status and HTML rendering.
 
-**Interfaces:**
-- Consumes: fully green Tasks 1–6.
-- Produces: Simple Paper Runtime v1 as the only PAPER correctness path.
+**Required tests before code:**
+- feed latency/age;
+- GitHub market mirror age;
+- Brain analysis/generation latency;
+- Azure plan pickup latency;
+- latest active position + version + plan;
+- latest execution outcome;
+- explicit degraded/error reason when any stage is stale/failing;
+- dashboard failure/write failure cannot affect execution state.
 
-- [ ] **Step 1: Run an end-to-end PAPER acceptance flow** from synthetic webhook through DB/log/mirror, scheduled plan fixture, 15-second cycle, position execution, and terminal logs.
-- [ ] **Step 2: Run controlled real MES/MNQ PAPER sessions** and verify every observed plan/action is explainable from contract-bound inputs.
-- [ ] **Step 3: Disable legacy correctness dependencies**: BAR_READY, market-context/deep-input chain, Event Brain, plan list/batch scan, execution/event state split, and dashboard control path.
-- [ ] **Step 4: Keep rollback until the simple path runs without manual intervention across the agreed validation window.**
-- [ ] **Step 5: Delete obsolete monitors/workflows only after cutover evidence is clean.**
+### Task 7: PAPER cutover and delete obsolete orchestration
+
+**Goal:** Make Simple Paper Runtime v1 the only PAPER correctness path after evidence proves it works.
+
+**Acceptance sequence:**
+1. synthetic end-to-end: webhook → DB/log/mirror → valid plan fixture → 15-second cycle → Position → logs;
+2. controlled real MES/MNQ PAPER session validation;
+3. disable old BAR_READY/context/deep-input/Event-Brain/plan-scan/event-state/execution-state/dashboard-control dependencies;
+4. keep rollback until the simple path runs without manual intervention across the agreed validation window;
+5. only then delete obsolete monitors and rollout/salvage workflows.
+
+## Sequential worker rule
+
+Tasks 2–7 are a dependency chain, not a parallel backlog. Only the earliest unfinished task is runnable. Each task must end with evidence (tests, relevant acceptance result, PR status) and explicitly release the next task. Workers must not “help” by starting later tasks while an earlier task is in progress or under review.
