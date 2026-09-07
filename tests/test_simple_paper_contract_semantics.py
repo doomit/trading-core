@@ -2,16 +2,18 @@ from datetime import datetime, timezone
 
 from trading_core.simple_paper_contracts import (
     candidate_plan_outcome,
+    plan_fits_quantity_limit,
     plan_latency_ms,
     position_ref,
 )
 
 
-def _position(version: int = 3) -> dict:
+def _position(version: int = 3, qty: int = 4) -> dict:
     return {
         "status": "OPEN",
         "position_id": "MES-20260907-0907-01",
         "position_version": version,
+        "qty": qty,
     }
 
 
@@ -78,3 +80,30 @@ def test_plan_latency_uses_analysis_bar_generation_and_pull_timestamps():
     pulled_at = datetime(2026, 9, 7, 17, 15, 35, tzinfo=timezone.utc)
 
     assert plan_latency_ms(analysis_bar_end, generated, pulled_at) == (20000, 15000)
+
+
+def test_flat_open_quantity_limit_counts_entry_plus_optional_add():
+    flat_position = {"status": "FLAT", "position_id": None, "position_version": None, "qty": 0}
+    plan = {
+        "decision": "OPEN",
+        "entry": {"qty": 4},
+        "add_once": {"qty": 2},
+        "reduce_once": None,
+    }
+    assert plan_fits_quantity_limit(plan, flat_position, 6)
+
+    plan["add_once"] = {"qty": 3}
+    assert not plan_fits_quantity_limit(plan, flat_position, 6)
+
+
+def test_open_update_quantity_limit_counts_current_position_plus_optional_add():
+    plan = {
+        "decision": "UPDATE",
+        "entry": None,
+        "add_once": {"qty": 2},
+        "reduce_once": {"qty": 1},
+    }
+    assert plan_fits_quantity_limit(plan, _position(qty=4), 6)
+
+    plan["add_once"] = {"qty": 3}
+    assert not plan_fits_quantity_limit(plan, _position(qty=4), 6)
