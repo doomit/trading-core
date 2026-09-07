@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "paper_execution_log_v1",
+  "title": "Paper Execution Log v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "execution_id",
+    "cycle_id",
+    "symbol",
+    "plan_id",
+    "position_id",
+    "position_version_before",
+    "position_version_after",
+    "action",
+    "side",
+    "qty",
+    "price",
+    "market_bar_end",
+    "executed_at",
+    "synthetic",
+    "reason",
+    "realized_pnl_usd"
+  ],
+  "properties": {
+    "schema": {"const": "paper_execution_log_v1"},
+    "execution_id": {"type": "string", "minLength": 1},
+    "cycle_id": {"type": "string", "minLength": 1},
+    "symbol": {"enum": ["MES", "MNQ"]},
+    "plan_id": {"type": ["string", "null"]},
+    "position_id": {"type": "string", "minLength": 1},
+    "position_version_before": {"type": ["integer", "null"], "minimum": 0},
+    "position_version_after": {"type": "integer", "minimum": 0},
+    "action": {
+      "enum": [
+        "OPEN",
+        "ADD",
+        "REDUCE",
+        "EXIT",
+        "STOP",
+        "TAKE_PROFIT",
+        "EOD_FORCED_CLOSE",
+        "STALE_FEED_FORCED_STOP"
+      ]
+    },
+    "side": {"enum": ["BUY", "SELL"]},
+    "qty": {"type": "integer", "minimum": 1, "maximum": 6},
+    "price": {"type": "number"},
+    "market_bar_end": {"type": "string", "format": "date-time"},
+    "executed_at": {"type": "string", "format": "date-time"},
+    "synthetic": {"type": "boolean"},
+    "reason": {"type": "string", "minLength": 1},
+    "realized_pnl_usd": {"type": "number"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"action": {"const": "STALE_FEED_FORCED_STOP"}}},
+      "then": {"properties": {"synthetic": {"const": true}}}
+    }
+  ],
+  "additionalProperties": false
+}
