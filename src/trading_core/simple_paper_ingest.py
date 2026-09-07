@@ -81,7 +81,7 @@ def persist_one_minute_window(
 def _market_bar_from_entity(entity: dict) -> dict:
     return {
         "start": _iso(int(entity["BarStart"])),
-        "end": _iso(int(entity["BarCloseTime"])),
+        "end": _iso(int(entity["BarClose"])),
         "open": float(entity["Open"]),
         "high": float(entity["High"]),
         "low": float(entity["Low"]),
@@ -131,7 +131,7 @@ def build_ingest_log(
 ) -> dict:
     if not effective_bars:
         raise ValueError("effective_bars must not be empty")
-    latest_bar_end_ms = max(int(row["BarCloseTime"]) for row in effective_bars)
+    latest_bar_end_ms = max(int(row["BarClose"]) for row in effective_bars)
     github_latency = None
     if github_mirrored_at is not None:
         github_latency = max(0, int(github_mirrored_at) - int(db_committed_at))
