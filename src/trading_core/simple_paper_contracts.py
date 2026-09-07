@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from math import isclose
 from typing import Any
 
 
@@ -77,6 +78,38 @@ def plan_latency_ms(
     if generation_ms < 0 or pickup_ms < 0:
         raise ValueError("plan timestamps must be monotonic")
     return generation_ms, pickup_ms
+
+
+def validate_paper_account_state_semantics(account: dict[str, Any]) -> None:
+    """Validate arithmetic invariants that JSON Schema cannot express."""
+    expected_balance = float(account["starting_balance_usd"]) + float(account["realized_pnl_usd"])
+    actual_balance = float(account["balance_usd"])
+    if not isclose(actual_balance, expected_balance, rel_tol=0.0, abs_tol=1e-6):
+        raise ValueError("balance_usd must equal starting_balance_usd + realized_pnl_usd")
+
+
+def validate_paper_execution_semantics(execution: dict[str, Any]) -> None:
+    """Validate deterministic position-version transitions for one paper execution."""
+    action = execution["action"]
+    before = execution["position_version_before"]
+    after = execution["position_version_after"]
+
+    if action == "OPEN":
+        if before is not None or after != 0:
+            raise ValueError("OPEN must create position version 0 from no previous position version")
+        if not isclose(float(execution["realized_pnl_usd"]), 0.0, rel_tol=0.0, abs_tol=1e-6):
+            raise ValueError("OPEN must not realize P&L")
+    else:
+        if not isinstance(before, int) or after != before + 1:
+            raise ValueError("position_version_after must equal position_version_before + 1")
+
+    if action == "ADD" and not isclose(
+        float(execution["realized_pnl_usd"]), 0.0, rel_tol=0.0, abs_tol=1e-6
+    ):
+        raise ValueError("ADD must not realize P&L")
+
+    if action == "STALE_FEED_FORCED_STOP" and execution["synthetic"] is not True:
+        raise ValueError("STALE_FEED_FORCED_STOP must be synthetic")
 
 
 def _parse_datetime(value: str) -> datetime:
