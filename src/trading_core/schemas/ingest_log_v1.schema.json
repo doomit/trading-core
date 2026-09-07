@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ingest_log_v1",
+  "title": "Ingest Log v1",
+  "type": "object",
+  "required": ["schema", "log_id", "symbol", "request_id", "logged_at", "latest_bar_end", "received_at", "db_committed_at", "github_status", "github_mirrored_at", "bars_received", "bars_inserted", "bars_updated", "market_to_webhook_latency_ms", "db_write_latency_ms", "github_mirror_latency_ms", "error"],
+  "properties": {
+    "schema": {"const": "ingest_log_v1"},
+    "log_id": {"type": "string", "minLength": 1},
+    "symbol": {"enum": ["MES", "MNQ"]},
+    "request_id": {"type": "string", "minLength": 1},
+    "logged_at": {"type": "string", "format": "date-time"},
+    "latest_bar_end": {"type": "string", "format": "date-time"},
+    "received_at": {"type": "string", "format": "date-time"},
+    "db_committed_at": {"type": "string", "format": "date-time"},
+    "github_status": {"enum": ["SUCCESS", "FAILED", "SKIPPED"]},
+    "github_mirrored_at": {"type": ["string", "null"], "format": "date-time"},
+    "bars_received": {"type": "integer", "minimum": 0},
+    "bars_inserted": {"type": "integer", "minimum": 0},
+    "bars_updated": {"type": "integer", "minimum": 0},
+    "market_to_webhook_latency_ms": {"type": "integer", "minimum": 0},
+    "db_write_latency_ms": {"type": "integer", "minimum": 0},
+    "github_mirror_latency_ms": {"type": ["integer", "null"], "minimum": 0},
+    "error": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trading_plan_v2",
+  "title": "Trading Plan v2",
+  "type": "object",
+  "required": ["schema", "plan_id", "symbol", "analysis_bar_end", "generated_at", "action_valid_until", "target_position", "decision", "side", "confidence", "analysis_summary", "entry", "protection", "add_once", "reduce_once"],
+  "properties": {
+    "schema": {"const": "trading_plan_v2"},
+    "plan_id": {"type": "string", "minLength": 1},
+    "symbol": {"enum": ["MES", "MNQ"]},
+    "analysis_bar_end": {"type": "string", "format": "date-time"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "action_valid_until": {"type": "string", "format": "date-time"},
+    "target_position": {"$ref": "#/$defs/position_ref"},
+    "decision": {"enum": ["NO_TRADE", "HOLD", "OPEN", "UPDATE", "EXIT"]},
+    "side": {"enum": ["LONG", "SHORT", null]},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "analysis_summary": {"type": "array", "items": {"type": "string"}},
+    "entry": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/order_instruction"}]},
+    "protection": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/protection"}]},
+    "add_once": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/order_instruction"}]},
+    "reduce_once": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/order_instruction"}]}
+  },
+  "$defs": {
+    "position_ref": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["state", "position_id", "position_version"],
+          "properties": {
+            "state": {"const": "FLAT"},
+            "position_id": {"type": "null"},
+            "position_version": {"type": "null"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["state", "position_id", "position_version"],
+          "properties": {
+            "state": {"const": "OPEN"},
+            "position_id": {"type": "string", "minLength": 1},
+            "position_version": {"type": "integer", "minimum": 0}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "order_instruction": {
+      "type": "object",
+      "required": ["order_type", "trigger_price", "qty"],
+      "properties": {
+        "order_type": {"enum": ["MARKET", "LIMIT", "STOP"]},
+        "trigger_price": {"type": ["number", "null"]},
+        "qty": {"type": "integer", "minimum": 1, "maximum": 6}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"order_type": {"const": "MARKET"}}},
+          "then": {"properties": {"trigger_price": {"type": "null"}}}
+        },
+        {
+          "if": {"properties": {"order_type": {"enum": ["LIMIT", "STOP"]}}},
+          "then": {"properties": {"trigger_price": {"type": "number"}}}
+        }
+      ],
+      "additionalProperties": false
+    },
+    "protection": {
+      "type": "object",
+      "required": ["stop_loss", "take_profit"],
+      "properties": {
+        "stop_loss": {"type": "number"},
+        "take_profit": {"type": "number"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"decision": {"const": "OPEN"}}},
+      "then": {
+        "properties": {
+          "target_position": {
+            "type": "object",
+            "properties": {"state": {"const": "FLAT"}}
+          },
+          "side": {"enum": ["LONG", "SHORT"]},
+          "entry": {"$ref": "#/$defs/order_instruction"},
+          "protection": {"$ref": "#/$defs/protection"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"decision": {"const": "NO_TRADE"}}},
+      "then": {
+        "properties": {
+          "target_position": {
+            "type": "object",
+            "properties": {"state": {"const": "FLAT"}}
+          },
+          "side": {"type": "null"},
+          "entry": {"type": "null"},
+          "protection": {"type": "null"},
+          "add_once": {"type": "null"},
+          "reduce_once": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"decision": {"const": "HOLD"}}},
+      "then": {
+        "properties": {
+          "target_position": {
+            "type": "object",
+            "properties": {"state": {"const": "OPEN"}}
+          },
+          "side": {"enum": ["LONG", "SHORT"]},
+          "entry": {"type": "null"},
+          "protection": {"type": "null"},
+          "add_once": {"type": "null"},
+          "reduce_once": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"decision": {"const": "UPDATE"}}},
+      "then": {
+        "properties": {
+          "target_position": {
+            "type": "object",
+            "properties": {"state": {"const": "OPEN"}}
+          },
+          "side": {"enum": ["LONG", "SHORT"]},
+          "entry": {"type": "null"}
+        },
+        "anyOf": [
+          {"properties": {"protection": {"$ref": "#/$defs/protection"}}},
+          {"properties": {"add_once": {"$ref": "#/$defs/order_instruction"}}},
+          {"properties": {"reduce_once": {"$ref": "#/$defs/order_instruction"}}}
+        ]
+      }
+    },
+    {
+      "if": {"properties": {"decision": {"const": "EXIT"}}},
+      "then": {
+        "properties": {
+          "target_position": {
+            "type": "object",
+            "properties": {"state": {"const": "OPEN"}}
+          },
+          "side": {"enum": ["LONG", "SHORT"]},
+          "entry": {"type": "null"},
+          "protection": {"type": "null"},
+          "add_once": {"type": "null"},
+          "reduce_once": {"type": "null"}
+        }
+      }
+    }
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "plan_observation_log_v1",
+  "title": "Plan Observation Log v1",
+  "type": "object",
+  "required": ["schema", "log_id", "symbol", "pulled_at", "candidate_plan_id", "candidate_generated_at", "analysis_bar_end", "current_position", "outcome", "brain_generation_latency_ms", "plan_pickup_latency_ms", "error"],
+  "properties": {
+    "schema": {"const": "plan_observation_log_v1"},
+    "log_id": {"type": "string", "minLength": 1},
+    "symbol": {"enum": ["MES", "MNQ"]},
+    "pulled_at": {"type": "string", "format": "date-time"},
+    "candidate_plan_id": {"type": ["string", "null"]},
+    "candidate_generated_at": {"type": ["string", "null"], "format": "date-time"},
+    "analysis_bar_end": {"type": ["string", "null"], "format": "date-time"},
+    "current_position": {"$ref": "#/$defs/position_ref"},
+    "outcome": {"enum": ["ACCEPTED", "NO_NEW_PLAN", "ALREADY_OBSERVED", "IGNORED_POSITION_MISMATCH", "IGNORED_EXPIRED", "READ_FAILED", "INVALID"]},
+    "brain_generation_latency_ms": {"type": ["integer", "null"], "minimum": 0},
+    "plan_pickup_latency_ms": {"type": ["integer", "null"], "minimum": 0},
+    "error": {"type": ["string", "null"]}
+  },
+  "$defs": {
+    "position_ref": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["state", "position_id", "position_version"],
+          "properties": {
+            "state": {"const": "FLAT"},
+            "position_id": {"type": "null"},
+            "position_version": {"type": "null"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["state", "position_id", "position_version"],
+          "properties": {
+            "state": {"const": "OPEN"},
+            "position_id": {"type": "string", "minLength": 1},
+            "position_version": {"type": "integer", "minimum": 0}
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "additionalProperties": false
+}
