@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "position_state_v1",
+  "title": "Position State v1",
+  "type": "object",
+  "required": ["schema", "symbol", "status", "position_id", "position_version", "side", "qty", "avg_entry", "stop_loss", "take_profit", "active_plan_id", "active_plan_generated_at", "action_valid_until", "pending_add", "pending_reduce", "opened_at", "updated_at", "closed_at", "last_action_id"],
+  "properties": {
+    "schema": {"const": "position_state_v1"},
+    "symbol": {"enum": ["MES", "MNQ"]},
+    "status": {"enum": ["FLAT", "OPEN", "CLOSED"]},
+    "position_id": {"type": ["string", "null"]},
+    "position_version": {"type": ["integer", "null"], "minimum": 0},
+    "side": {"enum": ["LONG", "SHORT", null]},
+    "qty": {"type": "integer", "minimum": 0, "maximum": 6},
+    "avg_entry": {"type": ["number", "null"]},
+    "stop_loss": {"type": ["number", "null"]},
+    "take_profit": {"type": ["number", "null"]},
+    "active_plan_id": {"type": ["string", "null"]},
+    "active_plan_generated_at": {"type": ["string", "null"], "format": "date-time"},
+    "action_valid_until": {"type": ["string", "null"], "format": "date-time"},
+    "pending_add": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/adjustment"}]},
+    "pending_reduce": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/adjustment"}]},
+    "opened_at": {"type": ["string", "null"], "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "closed_at": {"type": ["string", "null"], "format": "date-time"},
+    "last_action_id": {"type": ["string", "null"]}
+  },
+  "$defs": {
+    "adjustment": {
+      "type": "object",
+      "required": ["trigger_price", "qty"],
+      "properties": {
+        "trigger_price": {"type": "number"},
+        "qty": {"type": "integer", "minimum": 1, "maximum": 6}
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "FLAT"}}},
+      "then": {
+        "properties": {
+          "position_id": {"type": "null"},
+          "position_version": {"type": "null"},
+          "side": {"type": "null"},
+          "qty": {"const": 0},
+          "avg_entry": {"type": "null"},
+          "stop_loss": {"type": "null"},
+          "take_profit": {"type": "null"},
+          "active_plan_id": {"type": "null"},
+          "active_plan_generated_at": {"type": "null"},
+          "action_valid_until": {"type": "null"},
+          "pending_add": {"type": "null"},
+          "pending_reduce": {"type": "null"},
+          "opened_at": {"type": "null"},
+          "closed_at": {"type": "null"},
+          "last_action_id": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "OPEN"}}},
+      "then": {
+        "properties": {
+          "position_id": {"type": "string", "minLength": 1},
+          "position_version": {"type": "integer", "minimum": 0},
+          "side": {"enum": ["LONG", "SHORT"]},
+          "qty": {"type": "integer", "minimum": 1, "maximum": 6},
+          "avg_entry": {"type": "number"},
+          "stop_loss": {"type": "number"},
+          "take_profit": {"type": "number"},
+          "active_plan_id": {"type": "string", "minLength": 1},
+          "active_plan_generated_at": {"type": "string", "format": "date-time"},
+          "action_valid_until": {"type": "string", "format": "date-time"},
+          "opened_at": {"type": "string", "format": "date-time"},
+          "closed_at": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "CLOSED"}}},
+      "then": {
+        "properties": {
+          "position_id": {"type": "string", "minLength": 1},
+          "position_version": {"type": "integer", "minimum": 0},
+          "side": {"enum": ["LONG", "SHORT"]},
+          "qty": {"const": 0},
+          "avg_entry": {"type": "number"},
+          "active_plan_id": {"type": "string", "minLength": 1},
+          "opened_at": {"type": "string", "format": "date-time"},
+          "closed_at": {"type": "string", "format": "date-time"}
+        }
+      }
+    }
+  ],
+  "additionalProperties": false
+}
