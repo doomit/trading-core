@@ -16,10 +16,10 @@
     "side": {"enum": ["LONG", "SHORT", null]},
     "confidence": {"type": "number", "minimum": 0, "maximum": 1},
     "analysis_summary": {"type": "array", "items": {"type": "string"}},
-    "entry": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/entry"}]},
+    "entry": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/order_instruction"}]},
     "protection": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/protection"}]},
-    "add_once": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/adjustment"}]},
-    "reduce_once": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/adjustment"}]}
+    "add_once": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/order_instruction"}]},
+    "reduce_once": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/order_instruction"}]}
   },
   "$defs": {
     "position_ref": {
@@ -46,7 +46,7 @@
         }
       ]
     },
-    "entry": {
+    "order_instruction": {
       "type": "object",
       "required": ["order_type", "trigger_price", "qty"],
       "properties": {
@@ -74,15 +74,6 @@
         "take_profit": {"type": "number"}
       },
       "additionalProperties": false
-    },
-    "adjustment": {
-      "type": "object",
-      "required": ["trigger_price", "qty"],
-      "properties": {
-        "trigger_price": {"type": "number"},
-        "qty": {"type": "integer", "minimum": 1, "maximum": 6}
-      },
-      "additionalProperties": false
     }
   },
   "allOf": [
@@ -95,7 +86,7 @@
             "properties": {"state": {"const": "FLAT"}}
           },
           "side": {"enum": ["LONG", "SHORT"]},
-          "entry": {"$ref": "#/$defs/entry"},
+          "entry": {"$ref": "#/$defs/order_instruction"},
           "protection": {"$ref": "#/$defs/protection"}
         }
       }
