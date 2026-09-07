@@ -55,8 +55,8 @@ def _open_position() -> dict:
         "active_plan_id": "plan-mes-0945",
         "active_plan_generated_at": "2026-09-07T16:45:20Z",
         "action_valid_until": "2026-09-07T17:01:00Z",
-        "pending_add": {"trigger_price": 6504.0, "qty": 1},
-        "pending_reduce": {"trigger_price": 6509.0, "qty": 1},
+        "pending_add": {"order_type": "STOP", "trigger_price": 6504.0, "qty": 1},
+        "pending_reduce": {"order_type": "LIMIT", "trigger_price": 6509.0, "qty": 1},
         "opened_at": "2026-09-07T16:07:12Z",
         "updated_at": "2026-09-07T16:45:30Z",
         "closed_at": None,
@@ -79,8 +79,8 @@ def _open_plan() -> dict:
         "analysis_summary": ["breakout held", "pullback remained above support"],
         "entry": {"order_type": "LIMIT", "trigger_price": 6501.0, "qty": 4},
         "protection": {"stop_loss": 6495.0, "take_profit": 6512.0},
-        "add_once": {"trigger_price": 6504.0, "qty": 1},
-        "reduce_once": {"trigger_price": 6509.0, "qty": 1},
+        "add_once": {"order_type": "STOP", "trigger_price": 6504.0, "qty": 1},
+        "reduce_once": {"order_type": "LIMIT", "trigger_price": 6509.0, "qty": 1},
     }
 
 
@@ -211,7 +211,7 @@ def test_plan_contract_accepts_update_for_exact_position_version_and_rejects_unk
         "entry": None,
         "protection": {"stop_loss": 6499.0, "take_profit": 6515.0},
         "add_once": None,
-        "reduce_once": {"trigger_price": 6510.0, "qty": 1},
+        "reduce_once": {"order_type": "LIMIT", "trigger_price": 6510.0, "qty": 1},
     }
     _validate("trading_plan_v2.schema.json", value)
 
