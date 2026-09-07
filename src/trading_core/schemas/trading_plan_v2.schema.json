@@ -54,6 +54,16 @@
         "trigger_price": {"type": ["number", "null"]},
         "qty": {"type": "integer", "minimum": 1, "maximum": 6}
       },
+      "allOf": [
+        {
+          "if": {"properties": {"order_type": {"const": "MARKET"}}},
+          "then": {"properties": {"trigger_price": {"type": "null"}}}
+        },
+        {
+          "if": {"properties": {"order_type": {"enum": ["LIMIT", "STOP"]}}},
+          "then": {"properties": {"trigger_price": {"type": "number"}}}
+        }
+      ],
       "additionalProperties": false
     },
     "protection": {
