@@ -10,24 +10,34 @@ def _validate(schema_name: str, value: dict) -> None:
     Draft202012Validator(schema, format_checker=FormatChecker()).validate(value)
 
 
-def test_paper_account_contract_tracks_only_durable_realized_account_state():
-    value = {
+def _paper_account() -> dict:
+    return {
         "schema": "paper_account_state_v1",
         "account_id": "simple-paper-v1",
         "mode": "PAPER",
         "starting_balance_usd": 10000000.0,
         "realized_pnl_usd": 125.0,
         "balance_usd": 10000125.0,
-        "closed_action_count": 3,
         "updated_at": "2026-09-07T17:30:15Z",
         "last_execution_id": "exec-mes-173015-reduce",
     }
+
+
+def test_paper_account_contract_tracks_only_durable_realized_account_state():
+    value = _paper_account()
     _validate("paper_account_state_v1.schema.json", value)
 
     live = dict(value)
     live["mode"] = "LIVE"
     with pytest.raises(ValidationError):
         _validate("paper_account_state_v1.schema.json", live)
+
+
+def test_paper_account_contract_rejects_ambiguous_closed_action_counter():
+    value = _paper_account()
+    value["closed_action_count"] = 3
+    with pytest.raises(ValidationError):
+        _validate("paper_account_state_v1.schema.json", value)
 
 
 def test_paper_execution_contract_records_exact_action_price_quantity_and_realized_pnl():
