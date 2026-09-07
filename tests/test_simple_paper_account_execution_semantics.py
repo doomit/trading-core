@@ -71,7 +71,10 @@ def test_open_execution_creates_version_zero_from_no_previous_position_version()
 
 def test_existing_position_execution_increments_version_exactly_once():
     for action in ["ADD", "REDUCE", "EXIT", "STOP", "TAKE_PROFIT", "EOD_FORCED_CLOSE", "STALE_FEED_FORCED_STOP"]:
-        validate_paper_execution_semantics(_execution(action))
+        overrides = {"realized_pnl_usd": 0.0} if action == "ADD" else {}
+        if action == "STALE_FEED_FORCED_STOP":
+            overrides["synthetic"] = True
+        validate_paper_execution_semantics(_execution(action, **overrides))
 
     with pytest.raises(ValueError, match="position_version_after"):
         validate_paper_execution_semantics(_execution("REDUCE", position_version_before=4, position_version_after=6))
