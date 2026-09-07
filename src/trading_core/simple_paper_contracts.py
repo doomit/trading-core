@@ -44,6 +44,26 @@ def candidate_plan_outcome(
     return ACCEPTED
 
 
+def plan_fits_quantity_limit(
+    plan: dict[str, Any],
+    current_position: dict[str, Any],
+    max_contracts_per_symbol: int,
+) -> bool:
+    """Return whether the plan can ever increase exposure beyond the configured cap."""
+    if max_contracts_per_symbol < 0:
+        raise ValueError("max_contracts_per_symbol must be non-negative")
+
+    if plan.get("decision") == "OPEN":
+        entry = plan.get("entry") or {}
+        base_qty = int(entry.get("qty", 0))
+    else:
+        base_qty = int(current_position.get("qty", 0))
+
+    add_once = plan.get("add_once") or {}
+    add_qty = int(add_once.get("qty", 0))
+    return base_qty + add_qty <= max_contracts_per_symbol
+
+
 def plan_latency_ms(
     analysis_bar_end: str,
     generated_at: str,
