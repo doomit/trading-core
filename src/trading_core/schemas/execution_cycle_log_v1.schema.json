@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "execution_cycle_log_v1",
+  "title": "Execution Cycle Log v1",
+  "type": "object",
+  "required": ["schema", "log_id", "cycle_id", "tick_at", "symbol", "latest_market_end", "market_age_ms", "start_position", "end_position", "plan_id", "outcome", "synthetic", "eod_forced", "stale_feed", "error"],
+  "properties": {
+    "schema": {"const": "execution_cycle_log_v1"},
+    "log_id": {"type": "string", "minLength": 1},
+    "cycle_id": {"type": "string", "minLength": 1},
+    "tick_at": {"type": "string", "format": "date-time"},
+    "symbol": {"enum": ["MES", "MNQ"]},
+    "latest_market_end": {"type": ["string", "null"], "format": "date-time"},
+    "market_age_ms": {"type": ["integer", "null"], "minimum": 0},
+    "start_position": {"$ref": "#/$defs/position_ref"},
+    "end_position": {"$ref": "#/$defs/position_ref"},
+    "plan_id": {"type": ["string", "null"]},
+    "outcome": {"enum": ["NO_ACTION", "OPENED", "ADDED", "REDUCED", "STOPPED", "TAKE_PROFIT", "EXITED", "EOD_FORCED_CLOSE", "STALE_FEED_FORCED_STOP", "SKIPPED_STALE_FLAT", "ERROR"]},
+    "synthetic": {"type": "boolean"},
+    "eod_forced": {"type": "boolean"},
+    "stale_feed": {"type": "boolean"},
+    "error": {"type": ["string", "null"]}
+  },
+  "$defs": {
+    "position_ref": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["state", "position_id", "position_version"],
+          "properties": {
+            "state": {"const": "FLAT"},
+            "position_id": {"type": "null"},
+            "position_version": {"type": "null"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["state", "position_id", "position_version"],
+          "properties": {
+            "state": {"const": "OPEN"},
+            "position_id": {"type": "string", "minLength": 1},
+            "position_version": {"type": "integer", "minimum": 0}
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "additionalProperties": false
+}
