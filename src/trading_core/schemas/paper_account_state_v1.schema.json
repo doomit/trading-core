@@ -10,7 +10,6 @@
     "starting_balance_usd",
     "realized_pnl_usd",
     "balance_usd",
-    "closed_action_count",
     "updated_at",
     "last_execution_id"
   ],
@@ -21,7 +20,6 @@
     "starting_balance_usd": {"const": 10000000.0},
     "realized_pnl_usd": {"type": "number"},
     "balance_usd": {"type": "number"},
-    "closed_action_count": {"type": "integer", "minimum": 0},
     "updated_at": {"type": "string", "format": "date-time"},
     "last_execution_id": {"type": ["string", "null"]}
   },
