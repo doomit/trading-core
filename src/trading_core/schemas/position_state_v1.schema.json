@@ -7,7 +7,7 @@
   "properties": {
     "schema": {"const": "position_state_v1"},
     "symbol": {"enum": ["MES", "MNQ"]},
-    "status": {"enum": ["FLAT", "OPEN", "CLOSED"]},
+    "status": {"enum": ["FLAT", "OPEN"]},
     "position_id": {"type": ["string", "null"]},
     "position_version": {"type": ["integer", "null"], "minimum": 0},
     "side": {"enum": ["LONG", "SHORT", null]},
@@ -22,7 +22,7 @@
     "pending_reduce": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/order_instruction"}]},
     "opened_at": {"type": ["string", "null"], "format": "date-time"},
     "updated_at": {"type": "string", "format": "date-time"},
-    "closed_at": {"type": ["string", "null"], "format": "date-time"},
+    "closed_at": {"type": "null"},
     "last_action_id": {"type": ["string", "null"]}
   },
   "$defs": {
@@ -86,21 +86,6 @@
           "action_valid_until": {"type": "string", "format": "date-time"},
           "opened_at": {"type": "string", "format": "date-time"},
           "closed_at": {"type": "null"}
-        }
-      }
-    },
-    {
-      "if": {"properties": {"status": {"const": "CLOSED"}}},
-      "then": {
-        "properties": {
-          "position_id": {"type": "string", "minLength": 1},
-          "position_version": {"type": "integer", "minimum": 0},
-          "side": {"enum": ["LONG", "SHORT"]},
-          "qty": {"const": 0},
-          "avg_entry": {"type": "number"},
-          "active_plan_id": {"type": "string", "minLength": 1},
-          "opened_at": {"type": "string", "format": "date-time"},
-          "closed_at": {"type": "string", "format": "date-time"}
         }
       }
     }
