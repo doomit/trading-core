@@ -108,7 +108,23 @@
       }
     },
     {
-      "if": {"properties": {"decision": {"enum": ["HOLD", "UPDATE", "EXIT"]}}},
+      "if": {"properties": {"decision": {"const": "HOLD"}}},
+      "then": {
+        "properties": {
+          "target_position": {
+            "type": "object",
+            "properties": {"state": {"const": "OPEN"}}
+          },
+          "side": {"enum": ["LONG", "SHORT"]},
+          "entry": {"type": "null"},
+          "protection": {"type": "null"},
+          "add_once": {"type": "null"},
+          "reduce_once": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"decision": {"const": "UPDATE"}}},
       "then": {
         "properties": {
           "target_position": {
@@ -117,6 +133,27 @@
           },
           "side": {"enum": ["LONG", "SHORT"]},
           "entry": {"type": "null"}
+        },
+        "anyOf": [
+          {"properties": {"protection": {"$ref": "#/$defs/protection"}}},
+          {"properties": {"add_once": {"$ref": "#/$defs/order_instruction"}}},
+          {"properties": {"reduce_once": {"$ref": "#/$defs/order_instruction"}}}
+        ]
+      }
+    },
+    {
+      "if": {"properties": {"decision": {"const": "EXIT"}}},
+      "then": {
+        "properties": {
+          "target_position": {
+            "type": "object",
+            "properties": {"state": {"const": "OPEN"}}
+          },
+          "side": {"enum": ["LONG", "SHORT"]},
+          "entry": {"type": "null"},
+          "protection": {"type": "null"},
+          "add_once": {"type": "null"},
+          "reduce_once": {"type": "null"}
         }
       }
     }
