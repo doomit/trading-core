@@ -1,10 +1,7 @@
 from datetime import datetime, timezone
 
-from trading_core.simple_paper_position_execution import (
-    eod_close_due,
-    force_eod_close,
-    manage_open_position,
-)
+from trading_core.simple_paper_eod import eod_close_due, force_eod_close
+from trading_core.simple_paper_position_execution import manage_open_position
 
 
 def _position():
