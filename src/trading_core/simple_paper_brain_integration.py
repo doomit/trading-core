@@ -32,6 +32,8 @@ def brain_run_path(run_id: str) -> str:
     value = str(run_id).strip()
     if not value:
         raise ValueError("run_id must not be empty")
+    if "/" in value or "\\" in value or value in {".", ".."}:
+        raise ValueError("run_id must be a single path-safe component")
     return f"runtime/simple-paper/brain-runs/{value}.json"
 
 
@@ -45,13 +47,14 @@ def run_scheduled_brain_job(
     read_control_text: Callable[[str], str],
     generate_plan: Callable[..., dict[str, Any]],
     publish_runtime_json: Callable[[str, dict[str, Any]], None],
+    publish_run_evidence: Callable[[str, dict[str, Any]], None],
 ) -> dict[str, Any]:
     """Run the stable Simple Paper Brain integration contract.
 
     Trading analysis itself is supplied by ``generate_plan``. This function owns
-    deterministic contract I/O, validation, failure isolation, and publication
-    bookkeeping only. One symbol may fail without replacing the other symbol's
-    last valid plan.
+    deterministic contract I/O, validation, failure isolation, safe plan
+    publication, and immutable run-evidence publication. One symbol may fail
+    without replacing the other symbol's last valid plan.
     """
     _aware(scheduled_run_time, "scheduled_run_time")
     _aware(generated_at, "generated_at")
@@ -64,6 +67,8 @@ def run_scheduled_brain_job(
         "mode": "PAPER",
         "symbols": {},
         "result": "blocked_or_failed",
+        "evidence_published": False,
+        "evidence_error": None,
     }
 
     try:
@@ -76,7 +81,7 @@ def run_scheduled_brain_job(
         blocker = f"shared Brain input invalid: {exc}"
         for symbol in SYMBOLS:
             result["symbols"][symbol] = _empty_symbol_result(blocker)
-        return result
+        return _finalize_evidence(result, run_id, publish_run_evidence)
 
     published_count = 0
     for symbol in SYMBOLS:
@@ -153,10 +158,6 @@ def run_scheduled_brain_job(
             }
             published_count += 1
         except Exception as exc:
-            if symbol_result["output_validation"] == "not_attempted" and symbol_result["position"] is not None:
-                # Input failures before generation remain not_attempted; generated-plan
-                # failures are reported as failed below.
-                pass
             text = str(exc)
             if _looks_like_generated_plan_failure(text):
                 symbol_result["output_validation"] = "failed"
@@ -166,7 +167,7 @@ def run_scheduled_brain_job(
         result["result"] = "published"
     elif published_count:
         result["result"] = "partial"
-    return result
+    return _finalize_evidence(result, run_id, publish_run_evidence)
 
 
 def _validate_generated_plan(
@@ -200,6 +201,21 @@ def _validate_generated_plan(
     max_contracts = int(execution_rules["max_contracts_per_symbol"])
     if not plan_fits_quantity_limit(plan, position, max_contracts):
         raise ValueError("generated plan quantity exceeds execution rule limit")
+
+
+def _finalize_evidence(
+    result: dict[str, Any],
+    run_id: str,
+    publish_run_evidence: Callable[[str, dict[str, Any]], None],
+) -> dict[str, Any]:
+    result["evidence_published"] = True
+    result["evidence_error"] = None
+    try:
+        publish_run_evidence(brain_run_path(run_id), result)
+    except Exception as exc:
+        result["evidence_published"] = False
+        result["evidence_error"] = str(exc)
+    return result
 
 
 def _empty_symbol_result(blocker: str | None) -> dict[str, Any]:
