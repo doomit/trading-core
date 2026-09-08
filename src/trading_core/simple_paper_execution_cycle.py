@@ -78,30 +78,35 @@ def run_symbol_execution_cycle(
     pickup_latency: int | None = None
 
     try:
-        candidate_plan = read_plan(PLAN_PATH_TEMPLATE.format(symbol=symbol))
+        raw_candidate_plan = read_plan(PLAN_PATH_TEMPLATE.format(symbol=symbol))
     except Exception as exc:  # adapter failure must not block durable OPEN management
         plan_outcome = "READ_FAILED"
         plan_error = str(exc)
     else:
-        if candidate_plan is not None:
-            try:
-                plan_outcome = candidate_plan_outcome(
-                    candidate_plan,
-                    current_position,
-                    tick_at,
-                    last_observed_plan_id=last_observed_plan_id,
-                )
-                generation_latency, pickup_latency = plan_latency_ms(
-                    candidate_plan["analysis_bar_end"],
-                    candidate_plan["generated_at"],
-                    tick_at,
-                )
-                if plan_outcome == ACCEPTED:
-                    accepted_plan = candidate_plan
-            except Exception as exc:
-                plan_outcome = "INVALID"
-                plan_error = str(exc)
-                accepted_plan = None
+        if raw_candidate_plan is not None and not isinstance(raw_candidate_plan, dict):
+            plan_outcome = "INVALID"
+            plan_error = "candidate plan must be a JSON object"
+        else:
+            candidate_plan = raw_candidate_plan
+            if candidate_plan is not None:
+                try:
+                    plan_outcome = candidate_plan_outcome(
+                        candidate_plan,
+                        current_position,
+                        tick_at,
+                        last_observed_plan_id=last_observed_plan_id,
+                    )
+                    generation_latency, pickup_latency = plan_latency_ms(
+                        candidate_plan["analysis_bar_end"],
+                        candidate_plan["generated_at"],
+                        tick_at,
+                    )
+                    if plan_outcome == ACCEPTED:
+                        accepted_plan = candidate_plan
+                except Exception as exc:
+                    plan_outcome = "INVALID"
+                    plan_error = str(exc)
+                    accepted_plan = None
 
     observation = _build_plan_observation(
         symbol=symbol,
