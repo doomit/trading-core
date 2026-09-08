@@ -4,6 +4,22 @@ from datetime import datetime
 from typing import Any
 
 
+def fill_price_for_order(order: dict[str, Any], side: str, bar: dict[str, float]) -> float | None:
+    """Resolve one explicit MARKET/LIMIT/STOP paper instruction against one bar."""
+    order_type = order["order_type"]
+    if order_type == "MARKET":
+        return float(bar["close"])
+
+    trigger = float(order["trigger_price"])
+    if order_type == "LIMIT":
+        touched = float(bar["low"]) <= trigger if side == "LONG" else float(bar["high"]) >= trigger
+    elif order_type == "STOP":
+        touched = float(bar["high"]) >= trigger if side == "LONG" else float(bar["low"]) <= trigger
+    else:
+        raise ValueError(f"unsupported order_type: {order_type!r}")
+    return trigger if touched else None
+
+
 def open_position_from_plan(
     *,
     current_position: dict[str, Any],
