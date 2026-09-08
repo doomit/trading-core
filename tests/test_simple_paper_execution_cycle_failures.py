@@ -131,3 +131,15 @@ def test_market_read_failure_still_enters_open_management_with_no_price():
     assert managed[0][1] is None
     assert result["stale_feed"] is True
     assert "azure table unavailable" in cycle_logs[0]["error"]
+
+
+def test_non_object_plan_is_invalid_without_blocking_open_management():
+    position = _open()
+    result, observations, managed, cycle_logs = _run(position, ["corrupt-plan"])
+    assert observations[0]["outcome"] == "INVALID"
+    assert observations[0]["candidate_plan_id"] is None
+    assert observations[0]["error"]
+    assert managed[0][0] is None
+    assert managed[0][1] is not None
+    assert result["outcome"] == "NO_ACTION"
+    assert cycle_logs[0]["outcome"] == "NO_ACTION"
