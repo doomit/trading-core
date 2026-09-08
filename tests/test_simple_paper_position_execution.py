@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from trading_core.simple_paper_position_execution import open_position_from_plan
+from trading_core.simple_paper_position_execution import fill_price_for_order, open_position_from_plan
 
 
 def test_flat_market_open_creates_version_zero_with_durable_protection():
@@ -58,3 +58,26 @@ def test_flat_market_open_creates_version_zero_with_durable_protection():
     assert position["pending_add"] is None
     assert position["pending_reduce"] is None
     assert position["last_action_id"] == "plan-mes-1815:open"
+
+
+def test_limit_and_stop_entry_semantics_are_explicit_for_long_and_short():
+    bar = {"high": 106.0, "low": 94.0, "close": 101.0}
+
+    assert fill_price_for_order(
+        {"order_type": "LIMIT", "trigger_price": 96.0, "qty": 1}, "LONG", bar
+    ) == 96.0
+    assert fill_price_for_order(
+        {"order_type": "STOP", "trigger_price": 105.0, "qty": 1}, "LONG", bar
+    ) == 105.0
+    assert fill_price_for_order(
+        {"order_type": "LIMIT", "trigger_price": 104.0, "qty": 1}, "SHORT", bar
+    ) == 104.0
+    assert fill_price_for_order(
+        {"order_type": "STOP", "trigger_price": 95.0, "qty": 1}, "SHORT", bar
+    ) == 95.0
+    assert fill_price_for_order(
+        {"order_type": "LIMIT", "trigger_price": 93.0, "qty": 1}, "LONG", bar
+    ) is None
+    assert fill_price_for_order(
+        {"order_type": "STOP", "trigger_price": 107.0, "qty": 1}, "LONG", bar
+    ) is None
