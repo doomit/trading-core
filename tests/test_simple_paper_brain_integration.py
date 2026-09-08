@@ -107,6 +107,7 @@ def _run(runtime_docs, generator, publisher):
         read_control_text=lambda path: "strategy prompt",
         generate_plan=generator,
         publish_runtime_json=publisher,
+        publish_run_evidence=lambda path, doc: None,
     )
 
 
