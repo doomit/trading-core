@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trade_ledger_v1",
+  "title": "Trade Ledger v1",
+  "type": "object",
+  "required": ["schema","account_id","symbol","position_id","opening_plan_id","side","opened_at","closed_at","entry_fills","add_fills","reduce_fills","exit_fill","exit_reason","gross_realized_pnl_usd","fees_usd","slippage_usd","net_realized_pnl_usd","duration_ms","event_ids","execution_ids"],
+  "properties": {
+    "schema": {"const": "trade_ledger_v1"},
+    "account_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$", "minLength": 1},
+    "symbol": {"enum": ["MES", "MNQ"]},
+    "position_id": {"type": "string", "minLength": 1},
+    "opening_plan_id": {"type": ["string", "null"]},
+    "side": {"enum": ["LONG", "SHORT"]},
+    "opened_at": {"type": "string", "format": "date-time"},
+    "closed_at": {"type": ["string", "null"], "format": "date-time"},
+    "entry_fills": {"type": "array", "items": {"$ref": "#/$defs/fill"}},
+    "add_fills": {"type": "array", "items": {"$ref": "#/$defs/fill"}},
+    "reduce_fills": {"type": "array", "items": {"$ref": "#/$defs/fill"}},
+    "exit_fill": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/fill"}]},
+    "exit_reason": {"type": ["string", "null"]},
+    "gross_realized_pnl_usd": {"type": "number"},
+    "fees_usd": {"type": "number"},
+    "slippage_usd": {"type": "number"},
+    "net_realized_pnl_usd": {"type": "number"},
+    "duration_ms": {"type": ["integer", "null"], "minimum": 0},
+    "event_ids": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "execution_ids": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  },
+  "$defs": {
+    "fill": {
+      "type": "object",
+      "required": ["execution_id","action","side","qty","price","executed_at","realized_pnl_usd"],
+      "properties": {
+        "execution_id": {"type": "string", "minLength": 1},
+        "action": {"type": "string", "minLength": 1},
+        "side": {"enum": ["BUY", "SELL"]},
+        "qty": {"type": "integer", "minimum": 1, "maximum": 6},
+        "price": {"type": "number"},
+        "executed_at": {"type": "string", "format": "date-time"},
+        "realized_pnl_usd": {"type": "number"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
