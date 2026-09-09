@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from math import isclose
 from typing import Any
@@ -9,6 +10,38 @@ ACCEPTED = "ACCEPTED"
 ALREADY_OBSERVED = "ALREADY_OBSERVED"
 IGNORED_POSITION_MISMATCH = "IGNORED_POSITION_MISMATCH"
 IGNORED_EXPIRED = "IGNORED_EXPIRED"
+
+DEFAULT_PAPER_ACCOUNT_ID = "simple-paper-v1"
+_PAPER_ACCOUNT_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def validate_paper_account_id(account_id: str) -> str:
+    """Validate and return one safe execution-domain account identifier."""
+    if not isinstance(account_id, str) or not account_id or _PAPER_ACCOUNT_ID_RE.fullmatch(account_id) is None:
+        raise ValueError("account_id must match [A-Za-z0-9._-]+")
+    return account_id
+
+
+def new_paper_account(account_id: str, updated_at: datetime) -> dict[str, Any]:
+    """Build canonical account-scoped PAPER state without authorizing non-paper execution."""
+    account_id = validate_paper_account_id(account_id)
+    if updated_at.tzinfo is None:
+        raise ValueError("timestamp must include timezone")
+    account = {
+        "schema": "paper_account_state_v2",
+        "account_id": account_id,
+        "account_type": "PAPER",
+        "broker": "INTERNAL_PAPER",
+        "environment": "paper",
+        "mode": "PAPER",
+        "starting_balance_usd": 10000000.0,
+        "realized_pnl_usd": 0.0,
+        "balance_usd": 10000000.0,
+        "updated_at": updated_at.isoformat().replace("+00:00", "Z"),
+        "last_execution_id": None,
+    }
+    validate_paper_account_state_semantics(account)
+    return account
 
 
 def position_ref(position: dict[str, Any]) -> dict[str, Any]:
