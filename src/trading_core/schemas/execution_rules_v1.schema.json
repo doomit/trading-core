@@ -27,7 +27,7 @@
       "required": ["timezone", "force_close_time"],
       "properties": {
         "timezone": {"const": "America/Los_Angeles"},
-        "force_close_time": {"const": "15:00:00"}
+        "force_close_time": {"const": "23:55:00"}
       },
       "additionalProperties": false
     },
