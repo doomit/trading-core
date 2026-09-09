@@ -15,7 +15,7 @@ The system must support multiple independent trading accounts while preserving t
 1. Make `account_id` a first-class execution boundary.
 2. Persist every semantic position-state change as an immutable Azure event before mutating current projections.
 3. Keep existing immutable execution/fill audit and relate it to position events.
-4. Mirror immutable events back to GitHub as create-only runtime evidence.
+4. Reliably mirror immutable events back to GitHub as create-only runtime evidence.
 5. Maintain mutable current account/position snapshots only as projections/cache.
 6. Produce per-position trade ledgers that allow exact realized P&L reconstruction from durable data.
 7. Preserve legacy `simple-paper-v1` behavior during migration.
@@ -35,15 +35,16 @@ Use account-scoped immutable position events in addition to the existing immutab
 
 Azure remains authoritative. For a semantic transition, persistence order is:
 
-1. Validate transition and derive event identity.
-2. Append immutable Azure `PositionEvent`.
+1. Validate transition and derive deterministic event identity.
+2. Append immutable Azure `PositionEvent` containing enough before/after data to reconcile the transition.
 3. Append immutable Azure execution/fill record when a fill occurred.
 4. Update Azure account projection.
 5. Update Azure position projection.
-6. Best-effort mirror immutable event to GitHub.
-7. Best-effort update GitHub current account/position projections.
+6. Ensure a durable Azure GitHub-mirror outbox item exists.
+7. Attempt create-only GitHub event/execution mirror and mutable current projections.
+8. Mark only the outbox delivery state complete after GitHub evidence is confirmed.
 
-If step 2 fails, no current account or position mutation is allowed. GitHub failure must never roll back an already durable Azure transition.
+If step 2 fails, no current account or position mutation is allowed. If a later Azure step fails, retry starts from the existing immutable event and reconciles downstream state exactly once. GitHub failure never rolls back an already durable Azure transition.
 
 ## Account Model
 
@@ -53,6 +54,8 @@ Every execution-domain artifact must carry:
 - `account_type`: `PAPER | PROP | LIVE`
 - `broker`
 - `environment`
+
+`account_id` must match `[A-Za-z0-9._-]+` so it is safe as an Azure partition key and GitHub path segment.
 
 The initial migrated account remains:
 
@@ -65,15 +68,45 @@ Future accounts may include identifiers such as `paper-aggressive-a2`, `lucid-50
 
 Plans may be shared across accounts. Executions, fills, positions, P&L, account limits, and event streams must never be shared across accounts.
 
+## Versioned Current-State Contracts
+
+New account-scoped runtime state uses versioned schemas rather than silently widening the existing strict contracts.
+
+### `position_state_v2`
+
+Adds at minimum:
+
+- `account_id`
+- `event_sequence`
+- `last_event_id`
+
+Opening a new position starts its event sequence at `1`. Every later semantic state event for that position increments it by one. Heartbeat-only freshness changes do not increment the semantic event sequence.
+
+### `paper_account_state_v2`
+
+Adds/standardizes at minimum:
+
+- `account_id`
+- `account_type`
+- `broker`
+- `environment`
+
+The legacy compatibility adapter may continue emitting old v1-shaped GitHub current-state documents temporarily while new canonical account-scoped paths use v2.
+
 ## Azure Storage
 
 ### Position Events
 
-Add an immutable table, e.g. `SimplePaperPositionEvents`.
+Add immutable table `SimplePaperPositionEvents`.
 
-Logical partitioning is account-scoped and symbol/position-aware. Exact physical key shape may optimize Azure Table limits, but uniqueness must include `account_id` and `event_id`.
+Concrete key scheme:
 
-Required fields:
+- `PartitionKey = account_id`
+- `RowKey = sha256(event_id)`
+
+Store indexed columns for `Symbol`, `PositionId`, `Sequence`, `EventType`, and `OccurredAt` in addition to the canonical `DocumentJson`.
+
+Required event document fields:
 
 - `schema = position_event_v1`
 - `event_id`
@@ -88,12 +121,17 @@ Required fields:
 - `occurred_at`
 - `plan_id` when applicable
 - `execution_id` when applicable
-- `before`
-- `after`
+- `position_before`
+- `position_after`
+- `account_before`
+- `account_after`
+- `execution` when applicable
 - `qty_delta`
 - `fill_price` when applicable
 - `realized_pnl_delta_usd`
 - `reason`
+
+The event must contain enough data to determine whether downstream account/position/execution projections are still at the before state, already at the after state, or in conflict.
 
 `event_id` must be deterministic/idempotent for retries of the same semantic transition.
 
@@ -101,17 +139,55 @@ Required fields:
 
 ### Existing Executions
 
-Keep `SimplePaperExecutions` immutable. Its logical identity and duplicate checks must become account-aware. The same plan or same symbol lifecycle in two accounts must not collide.
+Keep `SimplePaperExecutions` immutable.
+
+Concrete key scheme after migration:
+
+- `PartitionKey = account_id`
+- `RowKey = sha256(execution_id)`
+
+`execution_id` derivation must include the account execution domain. The same plan/action in two accounts must generate different execution ids.
 
 ### Current Positions
 
-Current position storage must become account-scoped. A position lookup must require `account_id + symbol` rather than symbol alone.
+Concrete key scheme:
+
+- `PartitionKey = account_id`
+- `RowKey = symbol`
+
+A position lookup in new code requires `account_id + symbol`; symbol-only lookup is allowed only inside the explicit legacy compatibility adapter.
 
 The current row remains a mutable projection, not historical truth.
 
-### Current Account
+### Current Accounts
 
-Account state storage must support independent rows per account. `get_account` and `save_account` APIs become account-scoped.
+Concrete key scheme:
+
+- `PartitionKey = CURRENT`
+- `RowKey = sha256(account_id)`
+
+The entity stores `AccountId` as an indexed/readable field and the canonical account document as `DocumentJson`.
+
+### GitHub Mirror Outbox
+
+Add mutable delivery-state table `SimplePaperGitHubMirrorOutbox`.
+
+Concrete key scheme:
+
+- `PartitionKey = account_id`
+- `RowKey = sha256(event_id)`
+
+The outbox is not trading history. It tracks delivery only, with fields such as:
+
+- `EventId`
+- `Symbol`
+- `TargetPathsJson`
+- `Status = PENDING | COMPLETE`
+- `AttemptCount`
+- `LastAttemptAt`
+- `LastError`
+
+Each normal execution timer cycle first/last performs a bounded drain of pending mirror items so a transient GitHub failure is retried without requiring a separate GitHub Action or high-frequency scheduler.
 
 ## Semantic Position Events
 
@@ -137,30 +213,34 @@ A heartbeat that changes only freshness timestamp must not produce a trade-histo
 
 ## Event Generation Boundary
 
-`trading-core` owns deterministic event derivation and validation because canonical contracts/build/tests live there.
+`trading-core` owns deterministic event derivation, event-type mapping, state-version semantics, trade-ledger projection, and validation because canonical contracts/build/tests live there.
 
-`trading-live` owns Azure persistence, GitHub mirroring, timer execution, and migration wiring.
+`trading-live` owns Azure persistence, reconciliation, GitHub mirroring/outbox delivery, timer execution, and migration wiring.
 
 `trading-runtime` remains runtime data only and must not gain validators or execution logic.
 
-## Commit Contract
+## Commit and Reconciliation Contract
 
-The current `commit_paper_transition` contract must evolve from execution-centric persistence to transition/event-centric persistence.
+The current `commit_paper_transition` contract evolves from execution-centric persistence to transition/event-centric persistence.
 
-A successful semantic transition must satisfy:
+For a new semantic transition:
 
-- immutable event append succeeds first;
-- duplicate retry is idempotent;
-- current projections reflect the event exactly once;
-- an execution record is appended exactly once when a fill exists;
-- GitHub mirrors are best effort and retryable;
-- no cross-account dedupe or state contamination occurs.
+1. Derive the deterministic event from the transition.
+2. If the event does not exist, append it immutably.
+3. If the event already exists, require byte-equivalent canonical semantics; mismatch is a hard conflict.
+4. Reconcile execution record from the event: create if absent, verify if present.
+5. Reconcile account projection: apply `account_after` only when current matches `account_before`; accept as complete when current already matches `account_after`; otherwise fail conflict.
+6. Reconcile position projection using the same before/after rule and optimistic concurrency.
+7. Ensure the GitHub mirror outbox item exists.
+8. Attempt mirror delivery.
+
+This rule makes partial persistence retryable without double-applying P&L or position changes.
 
 For changed-without-execution transitions, such as protection updates or pending-order expiry, the event is still mandatory even though no execution record exists.
 
 ## GitHub Runtime Layout
 
-New canonical layout:
+New canonical layout on `trading-runtime:gpt-runtime`:
 
 ```text
 runtime/simple-paper/accounts/<account_id>/
@@ -175,12 +255,13 @@ Rules:
 
 - `events/**` is create-only/immutable.
 - `executions/**` is create-only/immutable.
-- `account/current.json` is mutable projection.
-- `position/<symbol>/current.json` is mutable projection.
-- `trades/<symbol>/<position_id>.json` is a derived trade projection finalized/updated from immutable events.
+- create-only retry verifies existing canonical JSON; different content at an existing immutable path is a hard mirror conflict.
+- `account/current.json` is a mutable projection.
+- `position/<symbol>/current.json` is a mutable projection.
+- `trades/<symbol>/<position_id>.json` is a derived trade projection, mutable while OPEN and finalized at CLOSE.
 - GitHub content is audit/brain-facing evidence, not execution authority.
 
-Legacy paths may be dual-written temporarily for backward compatibility, but new readers should move to account-scoped paths.
+Legacy paths may be dual-written temporarily for backward compatibility, but new readers move to account-scoped paths.
 
 ## Trade Ledger Projection
 
@@ -209,38 +290,44 @@ Minimum trade projection fields:
 - `event_ids[]`
 - `execution_ids[]`
 
-For current internal paper trading, fees/slippage may be zero or explicitly unknown according to the existing simulator contract; they must not be fabricated.
+For the current internal paper simulator, fees and slippage are `0` only when the configured simulator models are explicitly `NONE`; otherwise they must come from the configured model and must never be fabricated.
 
 MAE/MFE may be added later and is not required for initial correctness.
 
 ## Migration
 
-1. Introduce account-aware APIs with default `simple-paper-v1` compatibility.
-2. Create the new Azure event table automatically via existing table initialization pattern.
-3. Migrate current account and position reads/writes to account-scoped keys.
-4. Dual-write legacy GitHub current position paths during a short compatibility window if current Brain readers still depend on them.
-5. Switch Brain/dashboard readers to account-scoped current paths.
-6. Remove legacy-path dependency only after tests and production PAPER evidence confirm correctness.
+1. Introduce v2 account-aware contracts while retaining explicit legacy adapters.
+2. Create the new Azure event and mirror-outbox tables through the existing table initialization pattern.
+3. Migrate current account and position reads/writes to the concrete account-scoped keys above.
+4. Seed or read-through existing `simple-paper-v1` current state without rewriting historical execution rows.
+5. Dual-write legacy GitHub current position paths during a compatibility window if current Brain readers still depend on them.
+6. Switch Brain/dashboard readers to account-scoped current paths.
+7. Remove legacy-path dependency only after tests and production PAPER evidence confirm correctness.
 
-Existing historical execution rows are not rewritten in place.
+Existing historical execution rows are not rewritten in place. Historical backfill into new position events is a separate optional migration.
 
 ## Failure Handling
 
 - Azure immutable event append failure: fail closed for that transition; do not mutate current projections.
-- Duplicate event: treat as already committed only when deterministic identity and stored content match expected semantic transition.
-- Azure execution append failure after event append: transition is incomplete; retry must reconcile from immutable event identity without double-applying projections.
-- Azure projection update failure after event append: retry/reconciliation must project the already-recorded event exactly once.
-- GitHub event mirror failure: log and retry later; do not undo Azure state.
-- GitHub current snapshot failure: log and retry later; Azure remains authoritative.
-- Cross-account lookup without explicit account id in new code: reject rather than silently falling back, except at a deliberate legacy compatibility adapter.
+- Duplicate event with matching canonical content: reconcile downstream state and continue idempotently.
+- Duplicate event with mismatching content: hard conflict; do not mutate projections.
+- Azure execution append failure after event append: retry from event and create/verify execution without generating a second event.
+- Azure account projection failure after event append: retry applies `account_after` only from the exact expected before state.
+- Azure position projection failure after event append: retry applies `position_after` only from the exact expected before state and with optimistic concurrency.
+- Outbox creation failure: event remains authoritative; next retry recreates the missing outbox before declaring mirror delivery complete.
+- GitHub immutable mirror failure: outbox stays pending; no Azure trading state is rolled back.
+- GitHub current snapshot failure: outbox stays pending until immutable evidence and required current projections are confirmed.
+- Cross-account lookup without explicit account id in new code: reject rather than silently falling back, except at the deliberate legacy compatibility adapter.
 
 ## Concurrency and Idempotency
 
 - Position optimistic concurrency remains required.
-- Position event identity must be deterministic from account + position + semantic transition identity.
-- Execution identity must include the account execution domain.
-- Retry after partial persistence must converge to one immutable event and one projection effect.
-- Two accounts executing the same plan must create independent events, executions, positions, and P&L.
+- Position event identity is deterministic from account + position + semantic transition identity.
+- Execution identity includes the account execution domain.
+- Retry after partial persistence converges to one immutable event, at most one execution record, and one projection effect.
+- Before/after reconciliation prevents double P&L application.
+- Two accounts executing the same plan create independent events, executions, positions, and P&L.
+- Event sequence is validated against the exact prior position state rather than allocated from a global counter.
 
 ## Required Tests
 
@@ -257,17 +344,25 @@ Existing historical execution rows are not rewritten in place.
 - protection-only UPDATE creates an event without execution;
 - pending-order expiry creates an event without execution;
 - heartbeat-only refresh creates no semantic event;
+- event contains sufficient before/after state for deterministic reconciliation;
 - trade ledger reconstruction returns exact realized P&L from executions/events;
 - legacy default account behavior remains semantically unchanged.
 
 ### Live adapter/storage tests
 
+- concrete Azure keys isolate accounts;
 - Azure event append precedes projection mutation;
 - event append failure leaves account and position unchanged;
-- retry after event success/projection failure is idempotent;
+- retry after event success/execution failure is idempotent;
+- retry after event success/account failure is idempotent;
+- retry after event success/position failure is idempotent;
 - duplicate event content mismatch fails loudly;
+- before/after projection mismatch fails conflict instead of overwriting;
 - GitHub mirror failure does not invalidate durable Azure transition;
+- pending outbox item is retried by later timer cycles;
 - GitHub immutable event path is create-only and never overwritten;
+- existing identical GitHub immutable JSON is accepted as idempotent success;
+- existing different GitHub immutable JSON is a hard conflict;
 - account-scoped position/account rows do not leak across accounts;
 - legacy GitHub current path dual-write works only during compatibility phase.
 
@@ -277,7 +372,8 @@ Existing historical execution rows are not rewritten in place.
 - PAPER-only safeguards remain green;
 - no new code path can route to live broker execution;
 - MES and MNQ behavior remains isolated inside each account;
-- timer-cycle heartbeat/concurrency protections remain intact.
+- timer-cycle heartbeat/concurrency protections remain intact;
+- mirror-outbox draining is bounded and cannot block protective execution indefinitely.
 
 ## Deployment Gates
 
@@ -287,11 +383,12 @@ Implementation may deploy only when:
 2. Full `trading-core` test suite passes.
 3. Relevant `trading-live` tests pass.
 4. PAPER-only safety checks pass.
-5. A dry-run or non-mutating migration validation confirms existing `simple-paper-v1` state can be read through account-scoped adapters.
+5. A dry-run/non-mutating migration validation confirms existing `simple-paper-v1` state can be read through account-scoped adapters.
 6. Deployment is limited to the existing PAPER runtime.
 7. Post-deploy evidence shows at least one complete OPEN -> optional ADD/REDUCE/UPDATE -> CLOSE lifecycle with matching Azure event stream and GitHub immutable mirror.
 8. Current account/position projections equal the terminal event state.
-9. No duplicate event is produced under an intentional retry/replay test.
+9. No duplicate event or double P&L is produced under intentional retry/replay tests.
+10. A simulated GitHub mirror failure leaves trading durable in Azure and later drains successfully from the outbox.
 
 ## Success Criteria
 
