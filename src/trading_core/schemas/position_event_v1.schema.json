@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "position_event_v1",
+  "title": "Position Event v1",
+  "type": "object",
+  "required": ["schema","event_id","account_id","account_type","broker","environment","symbol","position_id","sequence","event_type","occurred_at","plan_id","execution_id","position_before","position_after","account_before","account_after","execution","qty_delta","fill_price","realized_pnl_delta_usd","reason"],
+  "properties": {
+    "schema": {"const": "position_event_v1"},
+    "event_id": {"type": "string", "pattern": "^pevt-[0-9a-f]{32}$"},
+    "account_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$", "minLength": 1},
+    "account_type": {"const": "PAPER"},
+    "broker": {"const": "INTERNAL_PAPER"},
+    "environment": {"const": "paper"},
+    "symbol": {"enum": ["MES", "MNQ"]},
+    "position_id": {"type": "string", "minLength": 1},
+    "sequence": {"type": "integer", "minimum": 1},
+    "event_type": {"enum": ["POSITION_OPENED","POSITION_ADDED","POSITION_REDUCED","PROTECTION_UPDATED","PENDING_ORDERS_UPDATED","PENDING_ORDERS_EXPIRED","POSITION_EXITED","POSITION_STOPPED","POSITION_TARGET_HIT","POSITION_EOD_CLOSED","POSITION_STALE_FEED_CLOSED"]},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "plan_id": {"type": ["string", "null"]},
+    "execution_id": {"type": ["string", "null"]},
+    "position_before": {"type": "object"},
+    "position_after": {"type": "object"},
+    "account_before": {"type": "object"},
+    "account_after": {"type": "object"},
+    "execution": {"type": ["object", "null"]},
+    "qty_delta": {"type": "integer", "minimum": -6, "maximum": 6},
+    "fill_price": {"type": ["number", "null"]},
+    "realized_pnl_delta_usd": {"type": "number"},
+    "reason": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false
+}
