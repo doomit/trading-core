@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "position_state_v2",
+  "title": "Position State v2",
+  "type": "object",
+  "required": ["schema", "account_id", "event_sequence", "last_event_id", "symbol", "status", "position_id", "position_version", "side", "qty", "avg_entry", "stop_loss", "take_profit", "active_plan_id", "active_plan_generated_at", "action_valid_until", "pending_add", "pending_reduce", "opened_at", "updated_at", "closed_at", "last_action_id"],
+  "properties": {
+    "schema": {"const": "position_state_v2"},
+    "account_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$", "minLength": 1},
+    "event_sequence": {"type": "integer", "minimum": 0},
+    "last_event_id": {"type": ["string", "null"]},
+    "symbol": {"enum": ["MES", "MNQ"]},
+    "status": {"enum": ["FLAT", "OPEN"]},
+    "position_id": {"type": ["string", "null"]},
+    "position_version": {"type": ["integer", "null"], "minimum": 0},
+    "side": {"enum": ["LONG", "SHORT", null]},
+    "qty": {"type": "integer", "minimum": 0, "maximum": 6},
+    "avg_entry": {"type": ["number", "null"]},
+    "stop_loss": {"type": ["number", "null"]},
+    "take_profit": {"type": ["number", "null"]},
+    "active_plan_id": {"type": ["string", "null"]},
+    "active_plan_generated_at": {"type": ["string", "null"], "format": "date-time"},
+    "action_valid_until": {"type": ["string", "null"], "format": "date-time"},
+    "pending_add": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/order_instruction"}]},
+    "pending_reduce": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/order_instruction"}]},
+    "opened_at": {"type": ["string", "null"], "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "closed_at": {"type": "null"},
+    "last_action_id": {"type": ["string", "null"]}
+  },
+  "$defs": {
+    "order_instruction": {
+      "type": "object",
+      "required": ["order_type", "trigger_price", "qty"],
+      "properties": {
+        "order_type": {"enum": ["MARKET", "LIMIT", "STOP"]},
+        "trigger_price": {"type": ["number", "null"]},
+        "qty": {"type": "integer", "minimum": 1, "maximum": 6}
+      },
+      "allOf": [
+        {"if": {"properties": {"order_type": {"const": "MARKET"}}}, "then": {"properties": {"trigger_price": {"type": "null"}}}},
+        {"if": {"properties": {"order_type": {"enum": ["LIMIT", "STOP"]}}}, "then": {"properties": {"trigger_price": {"type": "number"}}}}
+      ],
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "FLAT"}}},
+      "then": {"properties": {
+        "position_id": {"type": "null"},
+        "position_version": {"type": "null"},
+        "side": {"type": "null"},
+        "qty": {"const": 0},
+        "avg_entry": {"type": "null"},
+        "stop_loss": {"type": "null"},
+        "take_profit": {"type": "null"},
+        "active_plan_id": {"type": "null"},
+        "active_plan_generated_at": {"type": "null"},
+        "action_valid_until": {"type": "null"},
+        "pending_add": {"type": "null"},
+        "pending_reduce": {"type": "null"},
+        "opened_at": {"type": "null"},
+        "closed_at": {"type": "null"},
+        "last_action_id": {"type": "null"}
+      }}
+    },
+    {
+      "if": {"properties": {"status": {"const": "OPEN"}}},
+      "then": {"properties": {
+        "position_id": {"type": "string", "minLength": 1},
+        "position_version": {"type": "integer", "minimum": 0},
+        "side": {"enum": ["LONG", "SHORT"]},
+        "qty": {"type": "integer", "minimum": 1, "maximum": 6},
+        "avg_entry": {"type": "number"},
+        "stop_loss": {"type": "number"},
+        "take_profit": {"type": "number"},
+        "active_plan_id": {"type": "string", "minLength": 1},
+        "active_plan_generated_at": {"type": "string", "format": "date-time"},
+        "action_valid_until": {"type": "string", "format": "date-time"},
+        "opened_at": {"type": "string", "format": "date-time"},
+        "closed_at": {"type": "null"}
+      }}
+    }
+  ],
+  "additionalProperties": false
+}
