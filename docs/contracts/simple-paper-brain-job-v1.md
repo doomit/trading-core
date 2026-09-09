@@ -31,7 +31,7 @@ Stable public control repository: `doomit/trading-core`, branch `main` after thi
 - Strategy prompt: `docs/strategy/simple-paper-v1.md`
 - Schemas: `src/trading_core/schemas/*.schema.json`
 
-Azure remains authoritative for market bars and Position. GitHub market and position files are best-effort mirrors for Brain. A stale or missing GitHub mirror must make Brain less actionable, never make Azure forget durable state.
+Azure remains authoritative for market bars and Position. GitHub market and position files are best-effort mirrors for Brain. Market freshness is determined from the market snapshot timestamps. Position freshness must not be inferred from the age of `Position.updated_at`; the Position document carries state identity, not a heartbeat. Missing or malformed exact-path inputs remain blockers, while Azure's authoritative position binding protects execution from a stale-but-valid GitHub Position observation.
 
 ## Inputs
 
@@ -56,12 +56,14 @@ The job may use retained conversation context or previously observed bars as sup
 
 ## Position binding
 
+Position.updated_at is a state-change timestamp, not a liveness heartbeat. The Brain must not classify a valid Position mirror as stale solely because `updated_at` is old. Position liveness is not inferred from timestamp age; execution safety comes from binding every plan to the exact observed position state and from Azure re-validating that binding against its authoritative Position before any paper action.
+
 The output plan must bind to exactly the position state that the job observed:
 
-- If current position status is `FLAT`, output `target_position = {state: FLAT, position_id: null, position_version: null}`.
-- If current position status is `OPEN`, output `target_position = {state: OPEN, position_id: <exact id>, position_version: <exact integer version>}`.
+- If current position status is `FLAT`, output `target_position = {state: FLAT, position_id: null, position_version: null}`. Therefore a valid exact-path `FLAT` Position may be used to generate an `OPEN` candidate regardless of the age of `updated_at`. Azure must re-check the current authoritative Position before executing that candidate; if Azure is no longer FLAT, the candidate must not execute.
+- If current position status is `OPEN`, output `target_position = {state: OPEN, position_id: <exact id>, position_version: <exact integer version>}`. For `OPEN`, bind to the exact observed `position_id` and `position_version`; `updated_at` age alone is not a blocker. Azure must reject actions whose position identity/version no longer matches authoritative state.
 
-Never guess or synthesize a position id/version.
+Never guess or synthesize a position id/version. A missing, unreadable, or schema-invalid Position file is a real blocker; an old `updated_at` value by itself is not.
 
 ## Plan output
 
@@ -106,11 +108,11 @@ For every symbol attempted, the Brain run evidence should expose at least:
 
 - scheduled run time;
 - market snapshot `updated_at` and `latest_bar_end`;
-- position `updated_at`, `position_id`, and `position_version`;
+- position `updated_at`, `position_id`, and `position_version` (for audit only; do not treat `position.updated_at` age as a heartbeat freshness signal);
 - previous plan id/generated time, if present;
 - new plan id/generated time, if successfully published;
 - `analysis_bar_end`;
-- input age / analysis latency that can be derived from those timestamps;
+- input age / analysis latency that can be derived from timestamps that actually represent freshness, such as market timestamps;
 - output validation result;
 - blocker/error, if any.
 
