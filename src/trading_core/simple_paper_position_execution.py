@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 from .simple_paper_contracts import (
     position_ref,
+    validate_paper_account_id,
     validate_paper_account_state_semantics,
     validate_paper_execution_semantics,
 )
@@ -27,12 +28,14 @@ def fill_price_for_order(order: dict[str, Any], side: str, bar: dict[str, float]
     return trigger if touched else None
 
 
-def new_flat_position(symbol: str, updated_at: datetime) -> dict[str, Any]:
-    """Build the canonical durable FLAT current-position state."""
+def new_flat_position(
+    symbol: str, updated_at: datetime, *, account_id: str | None = None
+) -> dict[str, Any]:
+    """Build canonical durable FLAT state; explicit account identity opts into v2."""
     if symbol not in {"MES", "MNQ"}:
         raise ValueError(f"unsupported symbol: {symbol!r}")
-    return {
-        "schema": "position_state_v1",
+    position = {
+        "schema": "position_state_v1" if account_id is None else "position_state_v2",
         "symbol": symbol,
         "status": "FLAT",
         "position_id": None,
@@ -52,6 +55,13 @@ def new_flat_position(symbol: str, updated_at: datetime) -> dict[str, Any]:
         "closed_at": None,
         "last_action_id": None,
     }
+    if account_id is not None:
+        position.update(
+            account_id=validate_paper_account_id(account_id),
+            event_sequence=0,
+            last_event_id=None,
+        )
+    return position
 
 
 def open_position_from_plan(
