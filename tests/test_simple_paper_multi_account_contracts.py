@@ -24,6 +24,40 @@ def _validate(name: str, value: dict) -> None:
     Draft202012Validator(_schema(name), format_checker=FormatChecker()).validate(value)
 
 
+def _open_plan() -> dict:
+    return {
+        "schema": "trading_plan_v2",
+        "plan_id": "plan-mes-shared",
+        "symbol": "MES",
+        "analysis_bar_end": "2026-09-09T19:30:00Z",
+        "generated_at": "2026-09-09T19:30:02Z",
+        "action_valid_until": "2026-09-09T19:45:00Z",
+        "target_position": {"state": "FLAT", "position_id": None, "position_version": None},
+        "decision": "OPEN",
+        "side": "LONG",
+        "confidence": 0.75,
+        "analysis_summary": ["multi-account contract test"],
+        "entry": {"order_type": "MARKET", "trigger_price": None, "qty": 2},
+        "protection": {"stop_loss": 6490.0, "take_profit": 6520.0},
+        "add_once": None,
+        "reduce_once": None,
+    }
+
+
+def _market() -> dict:
+    return {
+        "latest_bar_end": "2026-09-09T19:31:00Z",
+        "bars": [
+            {
+                "end": "2026-09-09T19:31:00Z",
+                "high": 6504.0,
+                "low": 6498.0,
+                "close": 6501.25,
+            }
+        ],
+    }
+
+
 def test_default_account_identity_is_explicit_and_safe():
     assert getattr(contracts, "DEFAULT_PAPER_ACCOUNT_ID", None) == "simple-paper-v1"
     validator = getattr(contracts, "validate_paper_account_id", None)
@@ -78,6 +112,33 @@ def test_v2_execution_contract_requires_account_execution_domain():
         "realized_pnl_usd": 0.0,
     }
     _validate("paper_execution_log_v2.schema.json", execution_record)
+
+
+def test_same_plan_and_position_id_in_two_accounts_have_independent_execution_identity():
+    results = {}
+    for account_id in ("paper-a", "paper-b"):
+        results[account_id] = execution.execute_flat_plan(
+            current_position=execution.new_flat_position("MES", NOW, account_id=account_id),
+            accepted_plan=_open_plan(),
+            market=_market(),
+            executed_at=datetime(2026, 9, 9, 19, 31, 5, tzinfo=timezone.utc),
+            cycle_id="cycle-shared",
+            account=contracts.new_paper_account(account_id, NOW),
+            position_id="shared-position-id",
+            point_value=5.0,
+        )
+
+    first = results["paper-a"]
+    second = results["paper-b"]
+    assert first["outcome"] == second["outcome"] == "OPENED"
+    assert first["position"]["account_id"] == "paper-a"
+    assert second["position"]["account_id"] == "paper-b"
+    assert first["execution"]["schema"] == second["execution"]["schema"] == "paper_execution_log_v2"
+    assert first["execution"]["account_id"] == "paper-a"
+    assert second["execution"]["account_id"] == "paper-b"
+    assert first["execution"]["execution_id"] != second["execution"]["execution_id"]
+    _validate("paper_execution_log_v2.schema.json", first["execution"])
+    _validate("paper_execution_log_v2.schema.json", second["execution"])
 
 
 def test_v1_contracts_remain_packaged_for_legacy_read_compatibility():
