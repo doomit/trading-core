@@ -705,7 +705,8 @@ def _execution_id(
     plan_id: str | None,
 ) -> str:
     plan_part = plan_id or "no-plan"
-    return f"{position_id}:v{version_after}:{action}:{market_bar_end}:{plan_part}"
+    market_part = "OPEN_ONCE" if action == "OPEN" else market_bar_end
+    return f"{position_id}:v{version_after}:{action}:{market_part}:{plan_part}"
 
 
 def _entry_execution_side(position_side: str) -> str:
