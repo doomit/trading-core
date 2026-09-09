@@ -20,7 +20,7 @@ def test_canonical_execution_rules_file_validates_against_public_contract():
     assert value["paper_initial_cash_usd"] == 10_000_000
     assert value["eod"] == {
         "timezone": "America/Los_Angeles",
-        "force_close_time": "15:00:00",
+        "force_close_time": "23:55:00",
     }
     assert value["stale_feed_forced_stop_minutes"] == 15
     assert value["same_bar_exit_policy"] == "ADVERSE_FIRST"
