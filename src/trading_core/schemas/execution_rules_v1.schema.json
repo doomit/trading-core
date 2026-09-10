@@ -26,7 +26,7 @@
       "type": "object",
       "required": ["timezone", "force_close_time"],
       "properties": {
-        "timezone": {"const": "America/Los_Angeles"},
+        "timezone": {"const": "America/New_York"},
         "force_close_time": {
           "type": "string",
           "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d$"
