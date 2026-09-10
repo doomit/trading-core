@@ -41,7 +41,7 @@ def _account():
     }
 
 
-def _market(close=103.0, end="2026-09-07T22:00:00Z"):
+def _market(close=103.0, end="2026-09-08T06:55:00Z"):
     return {
         "schema": "market_snapshot_v1",
         "symbol": "MES",
@@ -50,16 +50,24 @@ def _market(close=103.0, end="2026-09-07T22:00:00Z"):
     }
 
 
-def test_eod_due_uses_1500_america_los_angeles_boundary():
-    assert eod_close_due(datetime(2026, 9, 7, 21, 59, 59, tzinfo=timezone.utc)) is False
-    assert eod_close_due(datetime(2026, 9, 7, 22, 0, 0, tzinfo=timezone.utc)) is True
+def test_eod_due_uses_2355_america_los_angeles_boundary():
+    # 2026-09-07 is PDT (UTC-7). 15:00 PT must remain tradable.
+    assert eod_close_due(datetime(2026, 9, 7, 22, 0, 0, tzinfo=timezone.utc)) is False
+    assert eod_close_due(datetime(2026, 9, 8, 6, 54, 59, tzinfo=timezone.utc)) is False
+    assert eod_close_due(datetime(2026, 9, 8, 6, 55, 0, tzinfo=timezone.utc)) is True
+
+
+def test_eod_due_remains_dst_aware_in_winter():
+    # 2026-12-07 is PST (UTC-8).
+    assert eod_close_due(datetime(2026, 12, 8, 7, 54, 59, tzinfo=timezone.utc)) is False
+    assert eod_close_due(datetime(2026, 12, 8, 7, 55, 0, tzinfo=timezone.utc)) is True
 
 
 def test_eod_close_is_deterministic_paper_execution_at_latest_close():
     result = force_eod_close(
         current_position=_position(),
         market=_market(close=103.0),
-        executed_at=datetime(2026, 9, 7, 22, 0, 1, tzinfo=timezone.utc),
+        executed_at=datetime(2026, 9, 8, 6, 55, 1, tzinfo=timezone.utc),
         cycle_id="cycle-eod",
         account=_account(),
         point_value=5.0,
@@ -96,7 +104,12 @@ def test_explicit_exit_plan_closes_at_latest_close_when_protection_not_hit():
     result = manage_open_position(
         current_position=position,
         accepted_plan=exit_plan,
-        market=_market(close=103.0, end="2026-09-07T21:59:00Z"),
+        market={
+            "schema": "market_snapshot_v1",
+            "symbol": "MES",
+            "latest_bar_end": "2026-09-07T21:59:00Z",
+            "bars": [{"end": "2026-09-07T21:59:00Z", "high": 104.0, "low": 99.0, "close": 103.0}],
+        },
         executed_at=datetime(2026, 9, 7, 21, 59, 15, tzinfo=timezone.utc),
         cycle_id="cycle-exit",
         account=_account(),
