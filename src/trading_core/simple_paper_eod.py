@@ -8,7 +8,7 @@ from .simple_paper_position_execution import _bar_end, _close_transition, _lates
 
 
 EOD_TIMEZONE = "America/Los_Angeles"
-EOD_LOCAL_TIME = time(15, 0)
+EOD_LOCAL_TIME = time(23, 55)
 
 
 def eod_close_due(
@@ -17,7 +17,7 @@ def eod_close_due(
     timezone_name: str = EOD_TIMEZONE,
     close_time: time = EOD_LOCAL_TIME,
 ) -> bool:
-    """Return whether the PAPER v1 15:00 local EOD boundary has been reached."""
+    """Return whether the PAPER v1 23:55 local EOD boundary has been reached."""
     if tick_at.tzinfo is None:
         raise ValueError("tick_at must include timezone")
     local = tick_at.astimezone(ZoneInfo(timezone_name))
