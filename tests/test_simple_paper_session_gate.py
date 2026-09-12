@@ -2,11 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from trading_core.simple_paper_position_execution import (
-    execute_flat_plan,
-    manage_open_position,
-    new_flat_position,
-)
+from trading_core.simple_paper_position_execution import new_flat_position
+from trading_core.simple_paper_session_execution import execute_flat_plan, manage_open_position
 
 
 NOW = datetime(2026, 9, 11, 20, 0, tzinfo=timezone.utc)
