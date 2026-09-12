@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 from copy import deepcopy
 from datetime import datetime
 from typing import Any, Callable
 
 from .simple_paper_contracts import (
     position_ref,
+    validate_paper_account_id,
     validate_paper_account_state_semantics,
     validate_paper_execution_semantics,
 )
@@ -27,12 +29,14 @@ def fill_price_for_order(order: dict[str, Any], side: str, bar: dict[str, float]
     return trigger if touched else None
 
 
-def new_flat_position(symbol: str, updated_at: datetime) -> dict[str, Any]:
-    """Build the canonical durable FLAT current-position state."""
+def new_flat_position(
+    symbol: str, updated_at: datetime, *, account_id: str | None = None
+) -> dict[str, Any]:
+    """Build canonical durable FLAT state; explicit account identity opts into v2."""
     if symbol not in {"MES", "MNQ"}:
         raise ValueError(f"unsupported symbol: {symbol!r}")
-    return {
-        "schema": "position_state_v1",
+    position = {
+        "schema": "position_state_v1" if account_id is None else "position_state_v2",
         "symbol": symbol,
         "status": "FLAT",
         "position_id": None,
@@ -52,6 +56,13 @@ def new_flat_position(symbol: str, updated_at: datetime) -> dict[str, Any]:
         "closed_at": None,
         "last_action_id": None,
     }
+    if account_id is not None:
+        position.update(
+            account_id=validate_paper_account_id(account_id),
+            event_sequence=0,
+            last_event_id=None,
+        )
+    return position
 
 
 def open_position_from_plan(
@@ -78,9 +89,10 @@ def open_position_from_plan(
 
     protection = plan["protection"]
     executed_at_iso = _iso_z(executed_at)
+    v2 = current_position.get("schema") == "position_state_v2"
 
-    return {
-        "schema": "position_state_v1",
+    opened = {
+        "schema": "position_state_v2" if v2 else "position_state_v1",
         "symbol": current_position["symbol"],
         "status": "OPEN",
         "position_id": position_id,
@@ -100,6 +112,13 @@ def open_position_from_plan(
         "closed_at": None,
         "last_action_id": f'{plan["plan_id"]}:open',
     }
+    if v2:
+        opened.update(
+            account_id=validate_paper_account_id(current_position["account_id"]),
+            event_sequence=int(current_position.get("event_sequence", 0)),
+            last_event_id=current_position.get("last_event_id"),
+        )
+    return opened
 
 
 def apply_open_plan_update(
@@ -165,6 +184,7 @@ def execute_flat_plan(
     if executed_at > _parse_ts(accepted_plan["action_valid_until"]):
         return _no_action(current_position, account)
 
+    _validate_account_position_domain(account, current_position)
     bar = _latest_bar(market)
     if bar is None:
         return _no_action(current_position, account, stale_feed=True)
@@ -185,6 +205,7 @@ def execute_flat_plan(
         position_id=position_id,
     )
     execution_id = _execution_id(
+        account_id=_v2_account_id(account),
         position_id=position_id,
         version_after=0,
         action="OPEN",
@@ -196,6 +217,7 @@ def execute_flat_plan(
         execution_id=execution_id,
         cycle_id=cycle_id,
         position=opened,
+        account=account,
         plan_id=accepted_plan["plan_id"],
         version_before=None,
         version_after=0,
@@ -238,6 +260,7 @@ def manage_open_position(
     """
     if current_position.get("status") != "OPEN":
         raise ValueError("OPEN management requires OPEN current position")
+    _validate_account_position_domain(account, current_position)
 
     position = deepcopy(current_position)
     changed_without_execution = False
@@ -435,6 +458,7 @@ def _close_transition(
     qty = int(position["qty"])
     realized = _realized_pnl(position, price, qty, point_value)
     execution_id = _execution_id(
+        account_id=_v2_account_id(account),
         position_id=position["position_id"],
         version_after=version_after,
         action=action,
@@ -445,6 +469,7 @@ def _close_transition(
         execution_id=execution_id,
         cycle_id=cycle_id,
         position=position,
+        account=account,
         plan_id=plan_id,
         version_before=version_before,
         version_after=version_after,
@@ -459,7 +484,9 @@ def _close_transition(
         realized_pnl=realized,
     )
     next_account = _apply_account_execution(account, execution, executed_at)
-    flat = new_flat_position(position["symbol"], executed_at)
+    flat = new_flat_position(
+        position["symbol"], executed_at, account_id=position.get("account_id")
+    )
     return _transition(
         position=flat,
         account=next_account,
@@ -494,6 +521,7 @@ def _reduce_transition(
 
     realized = _realized_pnl(position, price, qty, point_value)
     execution_id = _execution_id(
+        account_id=_v2_account_id(account),
         position_id=position["position_id"],
         version_after=version_after,
         action="REDUCE",
@@ -505,6 +533,7 @@ def _reduce_transition(
         execution_id=execution_id,
         cycle_id=cycle_id,
         position=position,
+        account=account,
         plan_id=position.get("active_plan_id"),
         version_before=version_before,
         version_after=version_after,
@@ -551,6 +580,7 @@ def _add_transition(
     next_position["updated_at"] = _iso_z(executed_at)
 
     execution_id = _execution_id(
+        account_id=_v2_account_id(account),
         position_id=position["position_id"],
         version_after=version_after,
         action="ADD",
@@ -562,6 +592,7 @@ def _add_transition(
         execution_id=execution_id,
         cycle_id=cycle_id,
         position=position,
+        account=account,
         plan_id=position.get("active_plan_id"),
         version_before=version_before,
         version_after=version_after,
@@ -601,9 +632,11 @@ def _build_execution(
     synthetic: bool,
     reason: str,
     realized_pnl: float,
+    account: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    v2 = account is not None and account.get("schema") == "paper_account_state_v2"
     execution = {
-        "schema": "paper_execution_log_v1",
+        "schema": "paper_execution_log_v2" if v2 else "paper_execution_log_v1",
         "execution_id": execution_id,
         "cycle_id": cycle_id,
         "symbol": position["symbol"],
@@ -621,6 +654,13 @@ def _build_execution(
         "reason": reason,
         "realized_pnl_usd": float(realized_pnl),
     }
+    if v2:
+        execution.update(
+            account_id=validate_paper_account_id(account["account_id"]),
+            account_type=account["account_type"],
+            broker=account["broker"],
+            environment=account["environment"],
+        )
     validate_paper_execution_semantics(execution)
     return execution
 
@@ -703,10 +743,31 @@ def _execution_id(
     action: str,
     market_bar_end: str,
     plan_id: str | None,
+    account_id: str | None = None,
 ) -> str:
     plan_part = plan_id or "no-plan"
     market_part = "OPEN_ONCE" if action == "OPEN" else market_bar_end
-    return f"{position_id}:v{version_after}:{action}:{market_part}:{plan_part}"
+    if account_id is None:
+        return f"{position_id}:v{version_after}:{action}:{market_part}:{plan_part}"
+    material = "|".join(
+        [validate_paper_account_id(account_id), position_id, str(version_after), action, market_part, plan_part]
+    )
+    return f"exec-{hashlib.sha256(material.encode('utf-8')).hexdigest()[:24]}"
+
+
+def _v2_account_id(account: dict[str, Any]) -> str | None:
+    if account.get("schema") != "paper_account_state_v2":
+        return None
+    return validate_paper_account_id(account["account_id"])
+
+
+def _validate_account_position_domain(account: dict[str, Any], position: dict[str, Any]) -> None:
+    if position.get("schema") != "position_state_v2":
+        return
+    if account.get("schema") != "paper_account_state_v2":
+        raise ValueError("v2 position requires v2 account state")
+    if validate_paper_account_id(position["account_id"]) != validate_paper_account_id(account["account_id"]):
+        raise ValueError("account_id must match current position account_id")
 
 
 def _entry_execution_side(position_side: str) -> str:

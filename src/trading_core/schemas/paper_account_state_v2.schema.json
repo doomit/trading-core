@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "paper_account_state_v2",
+  "title": "Paper Account State v2",
+  "type": "object",
+  "required": [
+    "schema",
+    "account_id",
+    "account_type",
+    "broker",
+    "environment",
+    "mode",
+    "starting_balance_usd",
+    "realized_pnl_usd",
+    "balance_usd",
+    "updated_at",
+    "last_execution_id"
+  ],
+  "properties": {
+    "schema": {"const": "paper_account_state_v2"},
+    "account_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$", "minLength": 1},
+    "account_type": {"const": "PAPER"},
+    "broker": {"const": "INTERNAL_PAPER"},
+    "environment": {"const": "paper"},
+    "mode": {"const": "PAPER"},
+    "starting_balance_usd": {"const": 10000000.0},
+    "realized_pnl_usd": {"type": "number"},
+    "balance_usd": {"type": "number"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "last_execution_id": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}
