@@ -1,7 +1,7 @@
 {
   "calendar_id": "cme-equity-index",
   "content_sha256": "382c3d50abc9d5e0b95c45f1a8c182f9cf2042bc9dcf31a5a98128c59401e39e",
-  "effective_from": "2026-09-11T00:00:00Z",
+  "effective_from": "2026-01-01T00:00:00Z",
   "effective_until": "2028-12-31T23:59:59Z",
   "generated_at": "2026-09-12T04:40:00Z",
   "guard_windows": [
