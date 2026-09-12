@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "calendar_id": {"const": "cme-equity-index"},
+    "content_sha256": {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+    "effective_from": {"minLength": 1, "type": "string"},
+    "effective_until": {"minLength": 1, "type": "string"},
+    "generated_at": {"minLength": 1, "type": "string"},
+    "guard_windows": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "end": {"minLength": 1, "type": "string"},
+          "holiday_name": {"minLength": 1, "type": "string"},
+          "policy": {"const": "FAIL_CLOSED_FOR_NEW_RISK"},
+          "source_note": {"type": "string"},
+          "start": {"minLength": 1, "type": "string"},
+          "verification": {"const": "UNVERIFIED"}
+        },
+        "required": ["start", "end", "holiday_name", "verification", "policy"],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "overrides": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "end": {"minLength": 1, "type": "string"},
+          "holiday_name": {"minLength": 1, "type": "string"},
+          "source_note": {"type": "string"},
+          "source_year": {"minimum": 2026, "type": "integer"},
+          "start": {"minLength": 1, "type": "string"},
+          "status": {"enum": ["OPEN", "CLOSED", "EARLY_CLOSE", "LATE_OPEN"]},
+          "verification": {"const": "VERIFIED"}
+        },
+        "required": ["start", "end", "status", "holiday_name", "verification", "source_year"],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "products": {"items": {"enum": ["MES", "MNQ"]}, "minItems": 2, "type": "array", "uniqueItems": true},
+    "regular_week": {
+      "additionalProperties": false,
+      "properties": {
+        "daily_maintenance_end": {"pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$", "type": "string"},
+        "daily_maintenance_start": {"pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$", "type": "string"},
+        "friday_close": {"pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$", "type": "string"},
+        "sunday_open": {"pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$", "type": "string"}
+      },
+      "required": ["sunday_open", "friday_close", "daily_maintenance_start", "daily_maintenance_end"],
+      "type": "object"
+    },
+    "schema": {"const": "cme_market_calendar_v1"},
+    "source": {
+      "additionalProperties": false,
+      "properties": {
+        "authority": {"const": "CME Group"},
+        "notes": {"type": "string"},
+        "published_calendar_through_year": {"minimum": 2026, "type": "integer"},
+        "reference_data_api_url": {"minLength": 1, "type": "string"},
+        "trading_hours_url": {"minLength": 1, "type": "string"},
+        "verified_through_year": {"minimum": 0, "type": "integer"}
+      },
+      "required": ["authority", "trading_hours_url", "verified_through_year"],
+      "type": "object"
+    },
+    "timezone": {"const": "America/Chicago"},
+    "venue": {"const": "CME_GLOBEX"}
+  },
+  "required": ["schema", "calendar_id", "venue", "products", "timezone", "generated_at", "effective_from", "effective_until", "source", "regular_week", "overrides", "guard_windows", "content_sha256"],
+  "title": "CME Market Calendar v1",
+  "type": "object"
+}
