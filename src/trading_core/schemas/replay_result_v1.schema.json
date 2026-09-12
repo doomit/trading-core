@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "replay_result_v1.schema.json",
+  "title": "Replay Result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "config", "config_id", "symbol", "dataset_id", "timeframe", "split", "strategy_id", "start", "end", "bar_count", "fee_per_fill_usd", "slippage_points", "point_value_usd", "total_fees_usd", "fills", "trades", "metrics"],
+  "properties": {
+    "schema": {"const": "replay_result_v1"},
+    "config": {"type": "object"},
+    "config_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "symbol": {"type": "string", "minLength": 1},
+    "dataset_id": {"type": "string", "minLength": 1},
+    "timeframe": {"type": "string", "minLength": 1},
+    "split": {"enum": ["DEV", "VALID", "OOS"]},
+    "strategy_id": {"type": "string", "minLength": 1},
+    "start": {"type": ["string", "null"], "format": "date-time"},
+    "end": {"type": ["string", "null"], "format": "date-time"},
+    "bar_count": {"type": "integer", "minimum": 0},
+    "fee_per_fill_usd": {"type": "string"},
+    "slippage_points": {"type": "string"},
+    "point_value_usd": {"type": "string"},
+    "total_fees_usd": {"type": "string"},
+    "fills": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["signal_bar_index", "execution_bar_index", "side", "role", "price"],
+        "properties": {
+          "signal_bar_index": {"type": "integer", "minimum": 0},
+          "execution_bar_index": {"type": "integer", "minimum": 0},
+          "side": {"enum": ["LONG", "SHORT"]},
+          "role": {"enum": ["ENTRY", "EXIT"]},
+          "price": {"type": "string"}
+        }
+      }
+    },
+    "trades": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["signal_bar_index", "entry_bar_index", "exit_bar_index", "side", "entry_price", "exit_price", "gross_pnl_usd", "fees_usd", "net_pnl_usd"],
+        "properties": {
+          "signal_bar_index": {"type": "integer", "minimum": 0},
+          "entry_bar_index": {"type": "integer", "minimum": 0},
+          "exit_bar_index": {"type": "integer", "minimum": 0},
+          "side": {"enum": ["LONG", "SHORT"]},
+          "entry_price": {"type": "string"},
+          "exit_price": {"type": "string"},
+          "gross_pnl_usd": {"type": "string"},
+          "fees_usd": {"type": "string"},
+          "net_pnl_usd": {"type": "string"}
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trade_count", "winner_count", "loser_count", "gross_pnl_usd", "net_pnl_usd"],
+      "properties": {
+        "trade_count": {"type": "integer", "minimum": 0},
+        "winner_count": {"type": "integer", "minimum": 0},
+        "loser_count": {"type": "integer", "minimum": 0},
+        "gross_pnl_usd": {"type": "string"},
+        "net_pnl_usd": {"type": "string"}
+      }
+    }
+  }
+}
