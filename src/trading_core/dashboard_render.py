@@ -90,6 +90,22 @@ def render_dashboard(state: dict) -> str:
         else:
             lines.append("**Blockers:** none")
 
+    lines.extend(["", "## Scheduled Deep Brain", ""])
+    deep = state.get("scheduled_deep_brain")
+    if not deep:
+        lines.append("Scheduled Deep Brain projection unavailable.")
+    else:
+        freshness = deep.get("freshness", "STALE")
+        skipped = ", ".join(deep.get("skipped_symbols") or []) or "none"
+        lines.extend(
+            [
+                f"**State:** `{_cell(deep.get('state'))}` · **Freshness:** {STATUS_GLYPHS.get(freshness, '•')} `{freshness}` · **Age:** {_age(deep.get('age_seconds'))}",
+                f"**Context:** `{_cell(deep.get('context_version'))}` · **Last completed:** `{_cell(deep.get('last_completed_context_version'))}`",
+                f"**Run:** `{_cell(deep.get('run_id'))}` · **Worker:** `{_cell(deep.get('worker_id'))}` · **Outputs:** {deep.get('outputs_count', 0)}",
+                f"**Updated:** `{_cell(deep.get('updated_at'))}` · **Next expected:** `{_cell(deep.get('next_expected_at'))}` · **Skipped symbols:** {_cell(skipped)}",
+            ]
+        )
+
     lines.extend(
         [
             "",
