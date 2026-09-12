@@ -3,10 +3,19 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
-from trading_core.cme_market_calendar import exchange_session_state, load_calendar_bytes
+from trading_core.cme_market_calendar import (
+    canonical_calendar_digest,
+    exchange_session_state,
+    load_calendar_bytes,
+)
+
+
+ROOT = Path(__file__).resolve().parents[1]
+CANONICAL_SNAPSHOT = ROOT / "config" / "market-calendar" / "cme-equity-index-v1.json"
 
 
 def _calendar_bytes(*, overrides=None, guard_windows=None) -> bytes:
@@ -36,6 +45,16 @@ def _calendar_bytes(*, overrides=None, guard_windows=None) -> bytes:
     digest_source = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
     payload["content_sha256"] = hashlib.sha256(digest_source).hexdigest()
     return json.dumps(payload, sort_keys=True).encode()
+
+
+def test_canonical_snapshot_covers_2026_regular_week():
+    raw = json.loads(CANONICAL_SNAPSHOT.read_text(encoding="utf-8"))
+    assert raw["effective_from"] == "2026-01-01T00:00:00Z"
+    assert raw["content_sha256"] == canonical_calendar_digest(raw)
+    cal = load_calendar_bytes(CANONICAL_SNAPSHOT.read_bytes())
+    assert exchange_session_state(
+        "MES", datetime(2026, 9, 9, 20, 0, tzinfo=timezone.utc), cal
+    ) == "OPEN"
 
 
 def test_regular_weekend_is_closed():
