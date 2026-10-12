@@ -8,7 +8,7 @@ Define the stable contract for the scheduled ChatGPT Brain job used by Simple Pa
 
 - Run every 15 minutes on quarter-hour boundaries.
 - Hub priority: `urgent`.
-- Existing overdue work may run ahead of it; otherwise it outranks normal work.
+- Once a scheduled Brain window is due, this urgent Task outranks overdue normal work; it is FIFO-first among equal-priority urgent tasks. Never let repeatedly blocked stale tasks starve trading.
 - Do not create or use Event Brain in v1.
 - PAPER only.
 
